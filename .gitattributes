@@ -1,0 +1,11 @@
+# 默认 LF：远端脚本与前端资源都按 LF 提交，Windows 检出时也不会被改坏
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF
+*.bat text eol=crlf
+
+# 二进制
+*.exe binary
+*.png binary
+*.jpg binary
+*.gz  binary

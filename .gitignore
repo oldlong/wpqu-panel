@@ -1,0 +1,19 @@
+# 运行期数据：服务器档案（含加密后的凭据）、密钥、日志、备份，绝不入库
+data/
+
+# 编译产物
+/dist/
+wpqu-panel
+wpqu-panel.exe
+wpqu-panel-console.exe
+wpqu-panel-*
+*.exe
+*.exe~
+*.test
+
+# 编辑器 / 系统杂项
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

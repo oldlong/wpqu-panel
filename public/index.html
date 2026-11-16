@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WPQU panel</title>
+<link rel="stylesheet" href="/style.css">
+<script>
+  // 主题与语言都要在首帧前定下来：主题防闪白，语言防 :lang() 样式跳一下
+  (function () {
+    try {
+      var saved = localStorage.getItem('wpqu-theme');
+      var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      var lang = localStorage.getItem('wpqu-lang');
+      if (!lang) lang = (navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh-CN' : 'en';
+      document.documentElement.lang = lang;
+    } catch (e) {}
+  })();
+</script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">WQ</div>
+      <div class="brand-text">
+        <div class="brand-title">WPQU panel</div>
+        <div class="brand-sub">本地运维面板</div>
+      </div>
+    </div>
+
+    <div class="side-head">
+      <span class="side-label">服务器</span>
+      <button class="btn btn-ghost btn-xs" id="btn-add-server">添加</button>
+    </div>
+    <div class="server-list" id="server-list"></div>
+
+    <div class="side-foot">
+      <div class="side-row">
+        <button class="btn btn-ghost btn-xs" id="btn-theme" title="切换深色 / 浅色">夜间模式</button>
+        <button class="btn btn-ghost btn-xs" id="btn-lang" title="切换语言 / Switch language">中</button>
+      </div>
+      <button class="btn btn-ghost btn-xs btn-version" id="btn-version" title="版本与更新">v…</button>
+      <div class="hint">凭据加密存于本机<br>data/（AES-256-GCM）</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-info">
+        <h1 id="server-name">未选择服务器</h1>
+        <div class="meta" id="server-meta"></div>
+      </div>
+      <div class="topbar-actions" id="server-actions"></div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-tab="overview">概览</button>
+      <button class="tab" data-tab="sites">站点</button>
+      <button class="tab" data-tab="files">文件</button>
+      <button class="tab" data-tab="db">数据库</button>
+      <button class="tab" data-tab="ftp">FTP</button>
+      <button class="tab" data-tab="plugins">插件</button>
+      <button class="tab" data-tab="maint">维护</button>
+      <button class="tab" data-tab="backups">备份</button>
+      <button class="tab" data-tab="logs">操作记录</button>
+    </nav>
+
+    <section class="view" id="view"></section>
+  </main>
+</div>
+
+<div class="modal-backdrop hidden" id="modal"></div>
+
+<div class="drawer hidden" id="drawer">
+  <div class="drawer-head">
+    <div class="drawer-title" id="drawer-title">执行中</div>
+    <button class="btn btn-ghost btn-xs" id="drawer-close">收起</button>
+  </div>
+  <pre class="drawer-body" id="drawer-body"></pre>
+  <div class="drawer-foot" id="drawer-foot"></div>
+</div>
+
+<div class="toast-wrap" id="toast"></div>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

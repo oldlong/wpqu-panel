@@ -21,7 +21,7 @@ Example:
 
 ```bash
 curl -s http://127.0.0.1:7788/api/ping
-# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.0"}
+# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.2"}
 
 curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 ```
@@ -70,6 +70,25 @@ of a half-open stream. Timeouts still end with `end`, but with `code: -1` and `�
 | GET | `/api/servers/:id/doctor` | — | `{ok, doctor:{checks:[…]}}` health check, read-only |
 | GET | `/api/servers/:id/overview` | — | resources, versions, site list summary |
 | GET | `/api/servers/:id/site-detail` | `domain` | one site: root, type, PHP socket, SSL, size, file count |
+
+### Server vault (optional per-server local encryption)
+
+When a server's vault is enabled, its stored credentials are re-encrypted with a key derived from a
+passphrase (scrypt → AES-256-GCM). Operations that need those credentials return **HTTP 423** while
+the vault is locked, with `error` + `code`: `vault_locked` (needs unlocking), `vault_lockout`
+(too many wrong attempts; body carries `lockSeconds`), or `vault_bad_password` (body carries
+`remaining`; 5 wrong attempts lock it for one hour). Successful unlock starts a 30-minute session.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/api/servers/:id/vault` | — | `{enabled, setAt}` (or `enabled:false`) |
+| POST | `/api/servers/:id/vault` | `password`; plus `oldPassword` when changing | `{ok}` |
+| POST | `/api/servers/:id/vault/unlock` | `password` | `{ok}` (30-minute session) |
+| POST | `/api/servers/:id/vault/lock` | — | `{ok}` (clears the in-memory key) |
+| DELETE | `/api/servers/:id/vault` | `password` | `{ok}` (credentials go back to machine-key encryption) |
+
+Note: `PATCH /api/servers/:id` on an encrypted server also requires an unlocked vault (423
+`vault_need_password` otherwise). `POST /api/servers/:id/test` does not touch vault state.
 
 ## Sites
 

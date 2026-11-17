@@ -1,6 +1,6 @@
 /* WPQU panel — 前端逻辑（无框架，原生 DOM） */
 
-import { initI18n, cycleLang, t, currentLang } from './i18n/core.js';
+import { initI18n, setLang, t, currentLang } from './i18n/core.js';
 
 // 首屏就要生效：设 <html lang>、翻一遍现有节点、挂上观察器接管后续渲染
 initI18n();
@@ -112,9 +112,10 @@ function toast(msg, kind = '') {
 }
 
 async function api(path, opts = {}) {
+  const { _vaultRetry = false, _noVaultPrompt = false, ...rest } = opts;
   const res = await fetch(path, {
-    ...opts,
-    headers: { 'content-type': 'application/json', 'x-panel': '1', ...(opts.headers || {}) },
+    ...rest,
+    headers: { 'content-type': 'application/json', 'x-panel': '1', ...(rest.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -123,10 +124,29 @@ async function api(path, opts = {}) {
   } catch {
     data = null;
   }
+  // 423 = 这台服务器设了密码还没解锁：弹一次输入框，成功了原样重试
+  if (res.status === 423 && data && data.code && data.code.indexOf('vault_') === 0) {
+    if (!_noVaultPrompt && data.code === 'vault_locked' && !_vaultRetry) {
+      const ok = await promptVaultUnlock(data.serverId || serverIdFromPath(path));
+      if (ok) return api(path, { ...opts, _vaultRetry: true });
+    }
+    const e = new Error(data.error || '需要密码');
+    e.code = data.code;
+    e.data = data;
+    throw e;
+  }
   if (!res.ok) {
-    throw new Error((data && data.error) || `请求失败（${res.status}）`);
+    const e = new Error((data && data.error) || `请求失败（${res.status}）`);
+    e.code = data && data.code;
+    e.data = data;
+    throw e;
   }
   return data;
+}
+
+function serverIdFromPath(path) {
+  const m = /\/api\/servers\/([^/?#]+)/.exec(String(path || ''));
+  return m ? decodeURIComponent(m[1]) : '';
 }
 
 /* ---------------------------------------------------------------- 抽屉 */
@@ -155,7 +175,7 @@ function drawerDone(ok, message) {
  * 统一处理服务端的 ndjson 流。
  * hooks: { start(msg), out(text), end(evt), error(msg) }
  */
-async function streamPost(path, body, hooks = {}) {
+async function streamPost(path, body, hooks = {}, retried = false) {
   let res;
   try {
     res = await fetch(path, {
@@ -170,6 +190,11 @@ async function streamPost(path, body, hooks = {}) {
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
+    // 设了密码没解锁：先弹框，解锁后重新发起同一条流
+    if (res.status === 423 && data.code === 'vault_locked' && !retried) {
+      const ok = await promptVaultUnlock(data.serverId || serverIdFromPath(path));
+      if (ok) return streamPost(path, body, hooks, true);
+    }
     const msg = data.error || `请求失败（${res.status}）`;
     if (hooks.error) hooks.error(msg);
     return { ok: false, message: msg };
@@ -237,13 +262,20 @@ async function runStream(path, body, title, onFinish) {
 
 /* ---------------------------------------------------------------- 弹窗 */
 
+// 弹窗关闭时的回调：解锁框靠它把 Promise 收尾（点遮罩 / Esc 也要算）
+let modalOnClose = null;
+
 function closeModal() {
   $('#modal').classList.add('hidden');
   $('#modal').innerHTML = '';
+  const cb = modalOnClose;
+  modalOnClose = null;
+  if (cb) cb();
 }
 
 function openModal({ title, subtitle = '', body, footer, wide = false }) {
   const root = $('#modal');
+  modalOnClose = null;
   root.innerHTML = `
     <div class="modal ${wide ? 'wide' : ''}" role="dialog">
       <div class="modal-head">
@@ -284,7 +316,9 @@ function renderSidebar() {
       return `<div class="server-item ${active}" data-server="${s.id}">
         <span class="dot ${dot}"></span>
         <div class="server-item-body">
-          <div class="server-item-name">${esc(s.name)}</div>
+          <div class="server-item-name">${esc(s.name)}${
+            s.hasVault ? `<span class="lock-mini" title="${t('已设置本地密码')}">${LOCK_ICON}</span>` : ''
+          }</div>
           <div class="server-item-host">${esc(s.username)}@${esc(s.host)}:${s.port}</div>
         </div>
       </div>`;
@@ -312,6 +346,8 @@ function renderTopbar() {
 
   $('#server-actions').innerHTML = `
     <button class="btn btn-sm" data-act="refresh">${state.loadingSite ? '<span class="spinner"></span>' : '刷新'}</button>
+    <button class="btn btn-sm ${s.hasVault ? 'btn-vault-on' : ''}" data-act="vault"
+      title="${s.hasVault ? '这台服务器已启用本地加密，点击修改密码' : '给这台服务器设一个只在本机生效的密码'}">${LOCK_ICON}设置密码</button>
     <button class="btn btn-sm" data-act="edit-server">编辑</button>
     <button class="btn btn-sm btn-danger" data-act="del-server">移除</button>`;
 }
@@ -321,6 +357,7 @@ $('#server-actions').addEventListener('click', async (e) => {
   if (!btn) return;
   const act = btn.dataset.act;
   if (act === 'refresh') return loadSnapshot();
+  if (act === 'vault') return vaultModal();
   if (act === 'edit-server') return editServerModal();
   if (act === 'del-server') return removeServerFlow();
 });
@@ -532,6 +569,290 @@ function removeServerFlow() {
       toast(err.message, 'err');
     }
   });
+}
+
+/* ---------------------------------------------------------------- 本地加密（设置密码） */
+
+const LOCK_ICON =
+  '<svg class="lock-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="4.6" y="10.4" width="14.8" height="9.8" rx="2.2"/><path d="M8.2 10.4V7.9a3.8 3.8 0 0 1 7.6 0v2.5"/></svg>';
+
+function waitLabel(sec) {
+  if (sec < 60) return `${sec} 秒`;
+  const mins = Math.ceil(sec / 60);
+  if (mins < 60) return `${mins} 分钟`;
+  return `${Math.ceil(mins / 60)} 小时`;
+}
+
+// 服务端返回 423 时用它弹解锁框；同一时刻只开一个，多个请求共用同一次输入
+let vaultPrompting = null;
+
+function promptVaultUnlock(serverId) {
+  if (!serverId) return Promise.resolve(false);
+  if (vaultPrompting) return vaultPrompting;
+  vaultPrompting = new Promise((resolve) => unlockVaultModal(serverId, resolve)).finally(() => {
+    vaultPrompting = null;
+  });
+  return vaultPrompting;
+}
+
+function unlockVaultModal(serverId, done) {
+  const s = state.servers.find((x) => x.id === serverId);
+  const name = s ? s.name : '这台服务器';
+  let settled = false;
+  let lockedOut = false;
+  const finish = (ok) => {
+    if (settled) return;
+    settled = true;
+    done(ok);
+  };
+
+  openModal({
+    title: '输入密码',
+    subtitle: `${name} 已设置本地密码，解锁后才能继续操作`,
+    body: `
+      <div class="field">
+        <label>密码</label>
+        <input type="password" id="vault-pw" autocomplete="current-password" placeholder="本机密码">
+      </div>
+      <p class="vault-msg" id="vault-msg"></p>
+      <p class="vault-note">连错 5 次会锁定 1 小时，锁定期间重启面板也不会解除。</p>`,
+    footer: `<button class="btn" data-close>取消</button>
+             <button class="btn btn-primary" id="vault-go">解锁</button>`,
+  });
+
+  // 点遮罩、按 Esc、点取消都走 closeModal，这里统一兜住，避免 Promise 一直挂着
+  modalOnClose = () => finish(false);
+  $('#modal').querySelector('[data-close]').addEventListener('click', closeModal);
+
+  const btn = $('#vault-go');
+  const input = $('#vault-pw');
+
+  const submit = async () => {
+    if (lockedOut) {
+      closeModal();
+      return;
+    }
+    const pw = input.value;
+    if (!pw) {
+      input.focus();
+      return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try {
+      await api(`/api/servers/${serverId}/vault/unlock`, {
+        method: 'POST',
+        body: JSON.stringify({ password: pw }),
+        _noVaultPrompt: true,
+      });
+      modalOnClose = null;
+      closeModal();
+      finish(true);
+      toast('已解锁', 'ok');
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '解锁';
+      const d = err.data || {};
+      $('#vault-msg').textContent = err.message;
+      if (d.code === 'vault_lockout') {
+        lockedOut = true;
+        input.disabled = true;
+        btn.textContent = '知道了';
+        finish(false);
+      } else {
+        input.value = '';
+        input.focus();
+      }
+    }
+  };
+
+  btn.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+  });
+}
+
+function vaultStateLine(info) {
+  if (info.lockSeconds > 0) {
+    return `<div class="vault-state"><span class="tag warn">已锁定</span><span>还需要 ${waitLabel(info.lockSeconds)} 才能再试</span></div>`;
+  }
+  if (info.enabled) {
+    return `<div class="vault-state"><span class="tag ok">已启用</span><span>这台服务器的凭据只用你的密码解开，data/ 里看不到明文</span></div>`;
+  }
+  return `<div class="vault-state"><span class="tag">未设置</span><span>不设置也能正常使用面板</span></div>`;
+}
+
+async function vaultModal() {
+  const s = currentServer();
+  if (!s) return;
+  let info;
+  try {
+    info = (await api(`/api/servers/${s.id}/vault`, { _noVaultPrompt: true })).vault;
+  } catch (err) {
+    return toast(err.message, 'err');
+  }
+
+  // 锁定期：不给输入框，省得用户对着「密码错误」反复试
+  if (info.lockSeconds > 0) {
+    openModal({
+      title: '设置密码',
+      subtitle: `${s.name} 的本地密码正处于锁定状态`,
+      body: `${vaultStateLine(info)}
+        <p class="vault-note">锁定期间不接受任何密码尝试，重启面板也不会解除。到时间后重新进来输入密码即可。</p>`,
+      footer: `<button class="btn" data-close>关闭</button>`,
+    });
+    $('#modal').querySelector('[data-close]').addEventListener('click', closeModal);
+    return;
+  }
+
+  if (info.enabled) return vaultManageModal(s, info);
+  return vaultSetupModal(s, info);
+}
+
+function vaultSetupModal(s, info) {
+  openModal({
+    title: '设置密码',
+    subtitle: `给「${s.name}」单独加一层本地密码`,
+    body: `${vaultStateLine(info)}
+      <div class="field">
+        <label>密码</label>
+        <input type="password" id="vault-new" autocomplete="new-password" placeholder="随便设，几位数字也行">
+        <div class="note">不校验长度与复杂度 —— 防的是顺手拿到这台电脑的人，不是暴力破解</div>
+      </div>
+      <div class="field">
+        <label>确认密码</label>
+        <input type="password" id="vault-new2" autocomplete="new-password">
+      </div>
+      <p class="vault-note">密码只存在你脑子里：面板不保存密码，也没有找回方式。设好后每次启动面板都要输一次；连错 5 次锁定 1 小时。</p>`,
+    footer: `<button class="btn" data-close>取消</button>
+             <button class="btn btn-primary" id="vault-save">启用加密</button>`,
+  });
+  $('#modal').querySelector('[data-close]').addEventListener('click', closeModal);
+
+  $('#vault-save').addEventListener('click', async () => {
+    const a = $('#vault-new').value;
+    const b = $('#vault-new2').value;
+    if (!a) return toast('请填写密码', 'err');
+    if (a !== b) return toast('两次输入的密码不一致', 'err');
+    const btn = $('#vault-save');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 加密中';
+    try {
+      await api(`/api/servers/${s.id}/vault`, { method: 'POST', body: JSON.stringify({ password: a }), _noVaultPrompt: true });
+      closeModal();
+      toast('已启用本地加密', 'ok');
+      await afterVaultChange();
+    } catch (err) {
+      toast(err.message, 'err');
+      btn.disabled = false;
+      btn.textContent = '启用加密';
+    }
+  });
+}
+
+function vaultManageModal(s, info) {
+  const unlockLine = info.unlocked
+    ? `<div class="vault-state"><span class="tag ok">已解锁</span><span>30 分钟内免密，超时自动上锁</span>
+         <button class="btn btn-xs" id="vault-lock">立即锁定</button></div>`
+    : '';
+  openModal({
+    title: '设置密码',
+    subtitle: `「${s.name}」已启用本地加密`,
+    body: `${vaultStateLine(info)}${unlockLine}
+      <div class="field">
+        <label>原密码</label>
+        <input type="password" id="vault-old" autocomplete="current-password">
+        <div class="note">忘了原密码就关不掉加密，只能移除这台服务器后重新添加</div>
+      </div>
+      <div class="field">
+        <label>新密码</label>
+        <input type="password" id="vault-new" autocomplete="new-password">
+        <div class="note">不校验强度，几位数字也可以</div>
+      </div>
+      <div class="field">
+        <label>确认新密码</label>
+        <input type="password" id="vault-new2" autocomplete="new-password">
+      </div>
+      <p class="vault-note">密码只存在你脑子里：面板不保存密码，也没有找回方式。</p>`,
+    footer: `<button class="btn" data-close>取消</button>
+             <button class="btn btn-danger" id="vault-off">关闭加密</button>
+             <button class="btn btn-primary" id="vault-save">保存新密码</button>`,
+  });
+  $('#modal').querySelector('[data-close]').addEventListener('click', closeModal);
+
+  const lockBtn = $('#vault-lock');
+  if (lockBtn) {
+    lockBtn.addEventListener('click', async () => {
+      try {
+        await api(`/api/servers/${s.id}/vault/lock`, { method: 'POST', body: '{}', _noVaultPrompt: true });
+        closeModal();
+        toast('已锁定', 'ok');
+        await loadServers();
+        renderTopbar();
+        // 刚锁上就弹解锁框会很别扭：这里只把内容区换成提示，等下次操作再问密码
+        view().innerHTML = `<div class="empty">
+          <strong>已锁定</strong>
+          这台服务器的凭据已上锁。点右上角「设置密码」解锁，或者继续操作时按提示输入密码。
+        </div>`;
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    });
+  }
+
+  $('#vault-save').addEventListener('click', async () => {
+    const old = $('#vault-old').value;
+    const a = $('#vault-new').value;
+    const b = $('#vault-new2').value;
+    if (!old) return toast('请填写原密码', 'err');
+    if (!a) return toast('请填写新密码', 'err');
+    if (a !== b) return toast('两次输入的密码不一致', 'err');
+    const btn = $('#vault-save');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 保存中';
+    try {
+      await api(`/api/servers/${s.id}/vault`, {
+        method: 'POST',
+        body: JSON.stringify({ oldPassword: old, password: a }),
+        _noVaultPrompt: true,
+      });
+      closeModal();
+      toast('密码已更新', 'ok');
+      await afterVaultChange();
+    } catch (err) {
+      toast(err.message, 'err');
+      btn.disabled = false;
+      btn.textContent = '保存新密码';
+    }
+  });
+
+  $('#vault-off').addEventListener('click', async () => {
+    const old = $('#vault-old').value;
+    if (!old) return toast('请填写原密码', 'err');
+    const btn = $('#vault-off');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try {
+      await api(`/api/servers/${s.id}/vault`, {
+        method: 'DELETE',
+        body: JSON.stringify({ password: old }),
+        _noVaultPrompt: true,
+      });
+      closeModal();
+      toast('已关闭本地加密', 'ok');
+      await afterVaultChange();
+    } catch (err) {
+      toast(err.message, 'err');
+      btn.disabled = false;
+      btn.textContent = '关闭加密';
+    }
+  });
+}
+
+async function afterVaultChange() {
+  await loadServers();
+  renderTopbar();
+  await loadSnapshot();
 }
 
 /* ---------------------------------------------------------------- 视图分发 */
@@ -4176,19 +4497,19 @@ view().addEventListener('change', (e) => {
 
 /* ---------------------------------------------------------------- 主题 */
 
-function syncThemeButton() {
-  const dark = document.documentElement.dataset.theme === 'dark';
-  const btn = $('#btn-theme');
-  if (btn) {
-    btn.textContent = dark ? '日间模式' : '夜间模式';
-    btn.title = dark ? '切回浅色' : '切到深色底浅色字';
+// 一对并列按钮：太阳=浅色，月亮=深色。选中态用 aria-pressed 表达，
+// 样式靠 [aria-pressed="true"] 接，不额外挂 class。
+function syncThemeButtons() {
+  const cur = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  for (const b of document.querySelectorAll('[data-theme-mode]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.themeMode === cur));
   }
 }
 
 function applyTheme(mode, persist = true) {
   const dark = mode === 'dark';
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  syncThemeButton();
+  syncThemeButtons();
   if (persist) {
     try {
       localStorage.setItem('wpqu-theme', dark ? 'dark' : 'light');
@@ -4196,16 +4517,20 @@ function applyTheme(mode, persist = true) {
   }
 }
 
-$('#btn-theme').addEventListener('click', () => {
-  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
-});
+for (const b of document.querySelectorAll('[data-theme-mode]')) {
+  b.addEventListener('click', () => {
+    if (b.dataset.themeMode !== document.documentElement.dataset.theme) {
+      applyTheme(b.dataset.themeMode);
+    }
+  });
+}
 
-// 语言按钮：按 LANGS 顺序循环，切完 reload 让整页按新语言重渲染
-const btnLang = $('#btn-lang');
-if (btnLang) {
-  btnLang.addEventListener('click', cycleLang);
-  // 侧栏按钮上只放语种简写，完整名字放 title
-  if (currentLang() !== 'zh-CN') btnLang.title = 'Switch language / 切换语言';
+// 语言：CH / EN 两个并列按钮。切完 reload，让整页按新语言重渲染。
+for (const b of document.querySelectorAll('[data-lang]')) {
+  b.setAttribute('aria-pressed', String(b.dataset.lang === currentLang()));
+  b.addEventListener('click', () => {
+    if (b.dataset.lang !== currentLang()) setLang(b.dataset.lang);
+  });
 }
 
 // 没手动选过时跟随系统
@@ -4217,7 +4542,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e)
   if (!saved) applyTheme(e.matches ? 'dark' : 'light', false);
 });
 
-syncThemeButton();
+syncThemeButtons();
 
 /* ---------------------------------------------------------------- 插件市场 */
 

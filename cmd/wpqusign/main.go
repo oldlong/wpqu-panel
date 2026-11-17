@@ -5,19 +5,22 @@
 //	go run ./cmd/wpqusign license -key ../site/.keys/license.key -product openclaw \
 //	                              -expire 2027-12-31 -seats 1 -name "ACME"
 //	go run ./cmd/wpqusign verify  -pub <公钥> -in a.json -sig a.json.sig
+//
+// 发码逻辑在 internal/licensing，和后台 wpquadmin 共用；这个工具只做参数解析。
 package main
 
 import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"wpqu-panel/internal/licensing"
+	"wpqu-panel/internal/signing"
 )
 
 func main() {
@@ -115,27 +118,17 @@ func cmdSign(args []string) {
 	if err != nil {
 		die("读文件失败：%v", err)
 	}
-	sig := ed25519.Sign(priv, data)
 	target := *out
 	if target == "" {
 		target = *in + ".sig"
 	}
-	if err := os.WriteFile(target, []byte(base64.StdEncoding.EncodeToString(sig)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(target, []byte(signing.Sign(priv, data)+"\n"), 0o644); err != nil {
 		die("写签名失败：%v", err)
 	}
 	fmt.Printf("已签名 %s → %s（%d 字节）\n", *in, target, len(data))
 }
 
 // ---------------------------------------------------------------- license
-
-type licensePayload struct {
-	Product string `json:"p"`           // 插件 id
-	Expire  string `json:"e"`           // YYYY-MM-DD，空 = 永久
-	Seats   int    `json:"s"`           // 可安装机器数，0 = 不限
-	Name    string `json:"n,omitempty"` // 客户标识
-	ID      string `json:"i"`           // 授权码唯一 id（对账用）
-	Issued  string `json:"t"`           // 签发时间
-}
 
 func cmdLicense(args []string) {
 	fs := flag.NewFlagSet("license", flag.ExitOnError)
@@ -149,54 +142,31 @@ func cmdLicense(args []string) {
 	if *keyFile == "" || *product == "" {
 		die("需要 -key 与 -product")
 	}
-	if *expire != "" {
-		if _, err := time.Parse("2006-01-02", *expire); err != nil {
-			die("到期日格式应为 YYYY-MM-DD：%v", err)
-		}
-	}
 	priv := loadKey(*keyFile)
-	for i := 0; i < *count; i++ {
-		p := licensePayload{
-			Product: *product,
-			Expire:  *expire,
-			Seats:   *seats,
-			Name:    *name,
-			ID:      randomID(6),
-			Issued:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
-		}
-		body, _ := json.Marshal(p)
-		sig := ed25519.Sign(priv, body)
-		fmt.Printf("%s.%s.%s\n",
-			"WPQU1",
-			base64.RawURLEncoding.EncodeToString(body),
-			base64.RawURLEncoding.EncodeToString(sig))
+	codes, _, err := licensing.IssueMany(priv, licensing.License{
+		Product: *product,
+		Expire:  *expire,
+		Seats:   *seats,
+		Name:    *name,
+	}, *count)
+	if err != nil {
+		die("%v", err)
 	}
-}
-
-func randomID(n int) string {
-	const alphabet = "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-	buf := make([]byte, n)
-	_, _ = rand.Read(buf)
-	for i := range buf {
-		buf[i] = alphabet[int(buf[i])%len(alphabet)]
+	for _, c := range codes {
+		fmt.Println(c)
 	}
-	return string(buf)
 }
 
 // ---------------------------------------------------------------- verify
 
 func cmdVerify(args []string) {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
-	pubB64 := fs.String("pub", "", "公钥（base64）")
+	pubB64 := fs.String("pub", "", "公钥（base64），留空则用编译内置的发布公钥")
 	in := fs.String("in", "", "被签名文件")
 	sigFile := fs.String("sig", "", "签名文件（默认 <in>.sig）")
 	_ = fs.Parse(args)
-	if *pubB64 == "" || *in == "" {
-		die("需要 -pub 与 -in")
-	}
-	rawPub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(*pubB64))
-	if err != nil {
-		die("公钥解析失败：%v", err)
+	if *in == "" {
+		die("需要 -in")
 	}
 	data, err := os.ReadFile(*in)
 	if err != nil {
@@ -210,12 +180,12 @@ func cmdVerify(args []string) {
 	if err != nil {
 		die("读签名失败：%v", err)
 	}
-	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sigText)))
-	if err != nil {
-		die("签名解析失败：%v", err)
+	pub := *pubB64
+	if pub == "" {
+		pub = signing.ReleasePublicKey
 	}
-	if !ed25519.Verify(ed25519.PublicKey(rawPub), data, sig) {
-		fmt.Println("✗ 签名不匹配")
+	if err := signing.VerifyWith(pub, data, string(sigText)); err != nil {
+		fmt.Printf("✗ %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("✓ 签名有效")
@@ -224,22 +194,11 @@ func cmdVerify(args []string) {
 // ---------------------------------------------------------------- 工具
 
 func loadKey(path string) ed25519.PrivateKey {
-	raw, err := os.ReadFile(path)
+	priv, err := signing.LoadPrivateKey(path)
 	if err != nil {
-		die("读私钥失败：%v", err)
+		die("%v", err)
 	}
-	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil {
-		die("私钥不是合法 base64：%v", err)
-	}
-	switch len(b) {
-	case ed25519.PrivateKeySize:
-		return ed25519.PrivateKey(b)
-	case ed25519.SeedSize:
-		return ed25519.NewKeyFromSeed(b)
-	}
-	die("私钥长度异常：%d", len(b))
-	return nil
+	return priv
 }
 
 func die(format string, a ...any) {

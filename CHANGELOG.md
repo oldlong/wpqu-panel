@@ -4,6 +4,80 @@
 
 Notable changes, newest first. Versions are the value returned by `/api/ping`.
 
+## Admin console 1.0 (separate tool, versioned independently)
+
+New `wpquadmin` — a localhost-only web console for whoever runs the distribution site:
+
+- **Site content**: edit any text file under `site/` and `plugins-src/` in the browser; every save
+  snapshots the previous version so you can roll back
+- **Plugin marketplace**: edit `plugin.json` (price, category, copy), bump versions, pack and
+  publish; the list shows at a glance whether the published catalog matches the local sources
+- **License keys**: issue per plugin (single or bulk), export CSV, verify, void in the ledger. The
+  UI states plainly that the ledger is not revocation
+- **Release publishing**: push new binaries from `dist/` into `site/dl/`, rewrite and sign
+  `updates.json`, keep the last 20 versions
+- **Self-check**: `-check` verifies the site directory, that the private key's public half matches
+  the one baked into the panel, and that an admin password is set — non-zero exit otherwise
+
+**Double-click and go**: on Windows, just double-click the exe. On start it walks up from the exe
+location to find `site/`, `plugins-src/` and `dist/`, keeps `admin.json` next to the exe (no
+dependence on the working directory), generates a password if none exists and shows it in both the
+console and a dialog, then opens the browser. If the port is taken it walks forward; if an instance
+is already running it just points the browser at it instead of starting a second one that would
+fight over the same ledger files.
+
+Packing moved to `internal/pack` and key issuing to `internal/licensing`, shared by `wpqupack`,
+`wpqusign` and the console — so both paths produce byte-identical artifacts and can be mixed
+freely. Not part of the panel's update feed; `./build.sh admin` writes to `dist/admin/`.
+
+## 1.9.2
+
+**Per-server password (optional)**
+
+- New "Set password" in the top-right: applies to the current server only; skip it and the panel behaves as before
+- Once set, the SSH credentials are re-encrypted with AES-256-GCM under a key derived by `scrypt`
+  (N=32768, r=8, p=1); the previous machine-key `secret` is deleted, so `data/secret.key` cannot open
+  it and copying all of `data/` still reveals no plaintext
+- **No strength rules** — a single digit is accepted. The password itself is never stored (only a salt
+  and a verifier), so forgetting it means removing and re-adding the server
+- **Five wrong attempts lock it for an hour**: the counter and `LockedUntil` live in `servers.json`,
+  so restarting the panel does not clear them, and even the right password is refused while locked
+- Unlocking lasts 30 minutes and is renewed on use (a process restart clears it); you can lock now,
+  change or remove the password at any time
+- While locked, every server endpoint returns `423` with `code: vault_locked`; the UI prompts once and
+  replays the original request. `vault_lockout` / `vault_bad_password` carry the remaining seconds or attempts
+- Changing credentials on an encrypted server also requires unlocking, and they stay encrypted under
+  the derived key; `MarkServer` never drops the vault field (unit-tested)
+
+**Plugins**
+
+- The Node.js plugin now defaults to **24 LTS** (switchable to 20 / 22), and uninstall also removes
+  `nodesource.sources` plus the `/usr/local` binaries
+- docker / openclaw move to 1.0.2, carrying the install-path fixes verified on real machines
+
+## 1.9.1
+
+**Network-aware installs**
+
+- The panel now detects whether a server sits in China or overseas before installing anything: four endpoints are probed in parallel (Aliyun + Tencent Cloud mirrors vs. Google + raw.githubusercontent), results are cached for 12 hours in `/var/lib/wpqu/net.env`
+- Pin it manually with `echo 'REGION=cn' > /etc/wpqu/net.conf` (`cn` / `global` / `off`)
+- One shared shell library (`scripts/_mirrors.sh`, injected by `sync-mirrors.sh` like `_ws-lib.sh`) so every script and plugin bundle carries the same logic and still runs standalone
+- cloud intranet mirrors win when present (`mirrors.tencentyun.com` answers in 4 ms where the public Aliyun mirror needs 3 s)
+- apt sources are rewritten host-only (suites, components and `signed-by` are preserved, both `sources.list` and Debian 13 deb822 `*.sources`), verified with `apt-get update` and **rolled back automatically** if the mirror fails; originals kept as `*.wpqu.bak`
+- `apt-get update` runs with `Acquire::Languages=none`, halving index traffic
+- Download sources follow the region: PyPI, npm, GOPROXY, Go and Node binaries, wp-cli, WordPress core, GitHub release assets
+- Plugin installers no longer probe mirrors one by one — they try the regional source first, so installs start immediately
+- Health check gains a "network" item; plugin install logs print the detected region on the first line
+
+**Fixes found on a real machine**
+
+- `rand_pw` (Typecho) was killed by SIGPIPE under `pipefail` when generating a random password — the whole installer exited 141 before touching the database
+- Go plugin's SHA256 lookup was cut short by `head` closing the pipe, silently skipping verification; the `-A3` window also missed the `sha256` field
+- The Docker plugin used to shell out to `get.docker.com`, which is reset in China (the same host flips between `000` and `200` between requests) even though the URL it really needs is the `docker-ce` repo. In China it now installs `docker-ce` straight from the mirror's docker-ce repo, signing key included — done in about a minute
+- OpenClaw's official installer is a bash script (uses `[[ ]]`); running it through Debian's `sh` (dash) died with a syntax error. It now runs as `bash ... --no-onboard`
+- OpenClaw requires Node 24 while the Node.js plugin installs 22 into `/usr/local`, which shadows `/usr/bin` in `PATH` — the freshly installed 24 was silently ignored. The script now picks the newer binary explicitly
+- `$("cmd")` (quoting the whole command inside a substitution) turns the command name into a filename with a space; this is why OpenClaw's version line came out empty
+
 ## 1.9.0
 
 **Plugin marketplace**

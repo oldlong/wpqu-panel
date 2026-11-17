@@ -16,11 +16,12 @@ For internals see [ARCHITECTURE.md](ARCHITECTURE.md), for endpoints see [API.md]
 - [9. Maintenance](#9-maintenance)
 - [10. Backups](#10-backups)
 - [11. Activity log](#11-activity-log)
-- [12. Interface settings](#12-interface-settings)
-- [13. Plugins](#13-plugins)
-- [14. Updates](#14-updates)
-- [15. Troubleshooting](#15-troubleshooting)
-- [16. Removing the panel](#16-removing-the-panel)
+- [12. Set a password](#12-set-a-password)
+- [13. Interface settings](#13-interface-settings)
+- [14. Plugins](#14-plugins)
+- [15. Updates](#15-updates)
+- [16. Troubleshooting](#16-troubleshooting)
+- [17. Removing the panel](#17-removing-the-panel)
 
 ## 1. Before you start
 
@@ -342,15 +343,47 @@ the file stays meaningful.
 Failures include the diagnostic tail the panel collected from the server, which is usually enough to
 see whether it was a config test, a package conflict, or a certificate challenge.
 
-## 12. Interface settings
+## 12. Set a password
 
-- **Theme** — the button at the bottom of the sidebar toggles dark/light. Stored per browser; when you
-  never touched it, the OS preference is used.
-- **Language** — `EN` / `中` toggles between English and Simplified Chinese, stored per browser.
+With a server selected, the top-right corner has a **Set password** button. This is an optional
+local-encryption feature: it adds one more lock on top of this server's credentials (SSH password /
+private key). Encryption happens on your machine only — credentials are normally encrypted with the
+panel's own machine key; once you set a password they get re-encrypted with a key derived from your
+passphrase (scrypt → AES-256-GCM), and the original `secret` field is removed.
+
+The essentials:
+
+- **No strength check** — a 4-digit PIN works fine; it's there for convenience, not compliance
+- **The passphrase is never written to disk** — the panel stores only a salt and a verifier (a fixed
+  string encrypted with the same derived key); the passphrase itself exists in no file
+- **5 wrong attempts lock it for one hour** — the failure count and lock deadline are persisted, so
+  restarting the panel does not reset them; during a lockout even the correct password is refused
+- **Unlocks last 30 minutes** — after one correct entry, operations run without re-prompting for
+  half an hour (usage renews the session); **Lock now** in the top bar clears the in-memory key at
+  any time without touching your passphrase
+- **Editing credentials requires unlocking** — on an encrypted server, changing the password or
+  private key also requires the passphrase, and the change is saved under the passphrase-derived key
+- **If you forget it, start over** — the passphrase is stored nowhere, so a forgotten one cannot be
+  recovered; the only way out is removing that server and adding it again (the credentials stay
+  encrypted, there is no recovery)
+
+While locked, every operation that needs that server's credentials answers 423; the panel shows the
+unlock dialog once and replays the original request after a correct entry.
+
+If you don't want this, simply don't set a password — nothing changes. To turn it off, click
+**Set password → Disable** (it asks for the current passphrase), and credentials go back to
+machine-key encryption.
+
+## 13. Interface settings
+
+- **Theme** — two side-by-side buttons at the bottom of the sidebar (☀ light / ☾ dark); the active
+  one is highlighted. Stored per browser; when you never touched it, the OS preference is used.
+- **Language** — `CH` / `EN` buttons switch between Simplified Chinese and English, stored per browser.
   `?lang=en` or `?lang=zh-CN` forces a language for one link (handy for sharing a URL).
+- The very bottom of the sidebar links to `panel.wpqu.com` (opens in a new tab).
 - Server names, domains, database names, log contents and command output are never translated.
 
-## 13. Plugins
+## 14. Plugins
 
 Plugins cover what the panel deliberately doesn't do itself: install a Go, Python or Node toolchain on a
 server, install Docker, install OpenClaw, or add a tab to the panel.
@@ -452,14 +485,14 @@ still be uninstalled, and **Refresh** retries. This is deliberate: installing so
 catalogue is worse than not installing it.
 
 On an intranet you can point the panel at your own mirror (see `WPQU_UPDATE_BASE` in
-[14. Updates](#14-updates)); the catalogue and packages come from there, signatures still checked.
+[15. Updates](#15-updates)); the catalogue and packages come from there, signatures still checked.
 
 Packages you already installed stay in `data/plugins/<id>/`, so **Reinstall** on the same version does
 not download again.
 
-## 14. Updates
+## 15. Updates
 
-The `v1.9.0` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
+The `v1.9.2` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
 current version, the update check, and the release notes.
 
 ### When it checks
@@ -511,7 +544,7 @@ Signatures are still verified. A mirror needs its own `updates.json` signed with
 is compiled into the binary (`internal/signing`), so either rebuild the panel or mirror the official
 packages.
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### The GUI build does not start
 
@@ -575,7 +608,7 @@ Start with `data/update.log`; it records the check, download and swap. On Window
 On Linux the swap is atomic, so a failure to start is usually permissions or the wrong architecture
 (`file wpqu-panel-linux-amd64`); running the console build prints the reason.
 
-## 16. Removing the panel
+## 17. Removing the panel
 
 The panel lives entirely in one binary plus its data directory:
 

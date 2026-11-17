@@ -17,6 +17,12 @@ export default {
   '未选择服务器': 'No server selected',
   '夜间模式': 'Dark mode',
   '切换深色 / 浅色': 'Toggle dark / light',
+  '浅色模式': 'Light mode',
+  '深色模式': 'Dark mode',
+  '外观': 'Appearance',
+  '语言': 'Language',
+  '官网': 'Website',
+  '打开官网 panel.wpqu.com': 'Open panel.wpqu.com',
   '凭据加密存于本机': 'Credentials stored locally',
   'data/（AES-256-GCM）': 'in data/ (AES-256-GCM)',
   '执行中': 'Running',
@@ -395,6 +401,8 @@ export default {
   '如果站点用了 imagick、redis、swoole 这类扩展，切换后要确认新版本上也装了。':
     'If a site uses imagick, redis, swoole or similar, make sure they are installed for the new version too.',
   '知道了': 'Got it',
+  '立即锁定': 'Lock now',
+  '30 分钟内免密，超时自动上锁': 'No password for 30 minutes, then it locks itself again',
   'php 命令': 'the php command',
   '只影响在服务器上直接敲': 'Only affects which version runs when you type',
   '时用哪个版本（composer、wp-cli 会跟着它走），': ' on the server (composer and wp-cli follow it);',
@@ -808,6 +816,49 @@ export default {
     'The panel did not come back in time. Please start it manually.',
   '重要更新': 'Important',
   '升级到': 'Updating to',
+
+  /* ---------- 本地加密（设置密码） ---------- */
+  '设置密码': 'Set password',
+  '输入密码': 'Enter password',
+  '本机密码': 'Local password',
+  '解锁': 'Unlock',
+  '已解锁': 'Unlocked',
+  '未设置': 'Not set',
+  '启用加密': 'Enable encryption',
+  '关闭加密': 'Disable encryption',
+  '保存新密码': 'Save new password',
+  '确认密码': 'Confirm password',
+  '确认新密码': 'Confirm new password',
+  '原密码': 'Current password',
+  '加密中': 'Encrypting',
+  '保存中': 'Saving',
+  '验证中': 'Checking',
+  '请填写密码': 'Enter a password',
+  '请填写原密码': 'Enter the current password',
+  '请填写新密码': 'Enter a new password',
+  '两次输入的密码不一致': 'The two passwords do not match',
+  '已启用本地加密': 'Local encryption enabled',
+  '已关闭本地加密': 'Local encryption disabled',
+  '已设置本地密码': 'Local password set',
+  '这台服务器已启用本地加密，点击修改密码': 'This server has a local password — click to change it',
+  '给这台服务器设一个只在本机生效的密码': 'Set a password that only applies on this machine',
+  '这台服务器的凭据只用你的密码解开，data/ 里看不到明文':
+    "This server's credentials can only be opened with your password; nothing readable in data/",
+  '不设置也能正常使用面板': 'The panel works fine without it',
+  '连错 5 次会锁定 1 小时，锁定期间重启面板也不会解除。':
+    '5 wrong tries lock it for 1 hour, and restarting the panel does not clear the lock.',
+  '密码只存在你脑子里：面板不保存密码，也没有找回方式。':
+    'The password lives only in your head: the panel stores neither the password nor any way to recover it.',
+  '密码只存在你脑子里：面板不保存密码，也没有找回方式。设好后每次启动面板都要输一次；连错 5 次锁定 1 小时。':
+    'The password lives only in your head: the panel stores neither the password nor any way to recover it. You enter it once per panel start; 5 wrong tries lock it for an hour.',
+  '忘了原密码就关不掉加密，只能移除这台服务器后重新添加':
+    'Without the current password you cannot turn encryption off — remove the server and add it again',
+  '不校验强度，几位数字也可以': 'No strength rules — a few digits is fine',
+  '不校验长度与复杂度 —— 防的是顺手拿到这台电脑的人，不是暴力破解':
+    'No length or complexity rules — this guards against someone casually using this computer, not a brute force attack',
+  '随便设，几位数字也行': 'Anything works, a few digits is fine',
+  '锁定期间不接受任何密码尝试，重启面板也不会解除。到时间后重新进来输入密码即可。':
+    'No password attempts are accepted while locked, and restarting the panel does not lift it. Come back after the countdown and unlock again.',
 
   /* ---------- 便签插件（界面插件示例） ---------- */
   '服务器便签': 'Server notes',

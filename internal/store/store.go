@@ -43,6 +43,8 @@ type ServerRecord struct {
 	OS              string          `json:"os,omitempty"`
 	Hostname        string          `json:"hostname,omitempty"`
 	Secret          json.RawMessage `json:"secret,omitempty"`
+	// Vault 非空表示这台服务器设了本地密码，凭据由密码派生的密钥加密
+	Vault *VaultMeta `json:"vault,omitempty"`
 }
 
 // PublicView 是不含 secret 的对外形状（列表 / 详情返回用）。
@@ -59,6 +61,8 @@ type PublicView struct {
 	LastStatus      string  `json:"lastStatus"`
 	OS              string  `json:"os,omitempty"`
 	Hostname        string  `json:"hostname,omitempty"`
+	// HasVault 表示这台服务器设了本地密码（列表里画个小锁）
+	HasVault bool `json:"hasVault,omitempty"`
 }
 
 // Credentials 是解密后的 SSH 凭据。
@@ -73,6 +77,9 @@ type ServerWithSecret struct {
 	PublicView
 	Credentials  *Credentials
 	SecretBroken bool `json:"secretBroken,omitempty"`
+	// Locked 为 true 表示设了密码但当前没解锁，此时 Credentials 一定为 nil
+	Locked      bool   `json:"locked,omitempty"`
+	LockedUntil string `json:"lockedUntil,omitempty"`
 }
 
 // ServerInput 是新增 / 编辑服务器时的入参。
@@ -109,11 +116,15 @@ type Store struct {
 	dataDir string
 	key     []byte
 	Paths   Paths
+
+	// 本地加密解锁后的密钥（内存里，见 vault.go）
+	vaultMu   sync.Mutex
+	vaultKeys map[string]vaultSession
 }
 
 // Open 初始化数据目录并加载（或生成）密钥。
 func Open(dataDir string) (*Store, error) {
-	s := &Store{dataDir: dataDir}
+	s := &Store{dataDir: dataDir, vaultKeys: map[string]vaultSession{}}
 	s.Paths = Paths{
 		DataDir:   dataDir,
 		LogDir:    filepath.Join(dataDir, "logs"),
@@ -150,8 +161,11 @@ func Open(dataDir string) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) gcm() (cipher.AEAD, error) {
-	block, err := aes.NewCipher(s.key)
+func (s *Store) gcm() (cipher.AEAD, error) { return aeadOf(s.key) }
+
+// aeadOf 用任意 32 字节密钥建 GCM；本地加密（vault）也复用这里。
+func aeadOf(key []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
@@ -160,48 +174,12 @@ func (s *Store) gcm() (cipher.AEAD, error) {
 
 // Encrypt 输出与早期实现一致的 {iv, tag, data}（全 base64）。
 func (s *Store) Encrypt(plaintext string) (*SecretBox, error) {
-	aead, err := s.gcm()
-	if err != nil {
-		return nil, err
-	}
-	iv := make([]byte, aead.NonceSize())
-	if _, err := rand.Read(iv); err != nil {
-		return nil, err
-	}
-	data := aead.Seal(nil, iv, []byte(plaintext), nil)
-	return &SecretBox{
-		IV:   base64.StdEncoding.EncodeToString(iv),
-		Tag:  base64.StdEncoding.EncodeToString(data[len(data)-aead.Overhead():]),
-		Data: base64.StdEncoding.EncodeToString(data[:len(data)-aead.Overhead()]),
-	}, nil
+	return sealWithKey(s.key, plaintext)
 }
 
 // Decrypt 解早期实现写入的 {iv, tag, data}。
 func (s *Store) Decrypt(box *SecretBox) (string, error) {
-	aead, err := s.gcm()
-	if err != nil {
-		return "", err
-	}
-	iv, err := base64.StdEncoding.DecodeString(box.IV)
-	if err != nil {
-		return "", err
-	}
-	data, err := base64.StdEncoding.DecodeString(box.Data)
-	if err != nil {
-		return "", err
-	}
-	tag, err := base64.StdEncoding.DecodeString(box.Tag)
-	if err != nil {
-		return "", err
-	}
-	if len(tag) != aead.Overhead() {
-		return "", fmt.Errorf("tag 长度异常")
-	}
-	plain, err := aead.Open(nil, iv, append(data, tag...), nil)
-	if err != nil {
-		return "", err
-	}
-	return string(plain), nil
+	return openWithKey(s.key, box)
 }
 
 // ---------------------------------------------------------------- servers.json
@@ -267,12 +245,13 @@ func encodeFull(r *ServerRecord) (json.RawMessage, error) {
 		OS              string          `json:"os,omitempty"`
 		Hostname        string          `json:"hostname,omitempty"`
 		Secret          json.RawMessage `json:"secret,omitempty"`
+		Vault           *VaultMeta      `json:"vault,omitempty"`
 	}
 	return json.Marshal(fullRecord{
 		ID: r.ID, Name: r.Name, Host: r.Host, Port: r.Port, Username: r.Username,
 		AuthType: r.AuthType, Note: r.Note, CreatedAt: r.CreatedAt,
 		LastConnectedAt: r.LastConnectedAt, LastStatus: r.LastStatus,
-		OS: r.OS, Hostname: r.Hostname, Secret: r.Secret,
+		OS: r.OS, Hostname: r.Hostname, Secret: r.Secret, Vault: r.Vault,
 	})
 }
 
@@ -293,6 +272,7 @@ func publicView(r *ServerRecord) PublicView {
 		AuthType: r.AuthType, Note: r.Note, CreatedAt: r.CreatedAt,
 		LastConnectedAt: r.LastConnectedAt, LastStatus: r.LastStatus,
 		OS: r.OS, Hostname: r.Hostname,
+		HasVault: r.Vault != nil && r.Vault.Enabled,
 	}
 }
 
@@ -341,6 +321,20 @@ func (s *Store) GetServerWithSecret(id string) (*ServerWithSecret, error) {
 			continue
 		}
 		out := &ServerWithSecret{PublicView: publicView(r)}
+		if r.Vault != nil && r.Vault.Enabled {
+			// 设了密码的服务器只用密码派生的密钥解；没解锁就不给凭据
+			if key := s.vaultKey(r.ID); key != nil {
+				if creds, err := vaultCreds(key, r.Vault); err == nil {
+					out.Credentials = creds
+				}
+			} else {
+				out.Locked = true
+				if r.Vault.lockSeconds(time.Now()) > 0 {
+					out.LockedUntil = r.Vault.LockedUntil
+				}
+			}
+			return out, nil
+		}
 		if len(r.Secret) > 0 {
 			var box SecretBox
 			if err := json.Unmarshal(r.Secret, &box); err == nil && box.Data != "" {
@@ -448,30 +442,57 @@ func (s *Store) UpdateServer(id string, in ServerInput) (*PublicView, error) {
 			r.AuthType = in.AuthType
 		}
 		if in.Password != "" || in.PrivateKey != "" || in.Passphrase != "" {
-			prev := Credentials{}
-			if len(r.Secret) > 0 {
-				var box SecretBox
-				if json.Unmarshal(r.Secret, &box) == nil {
-					if plain, err := s.Decrypt(&box); err == nil {
-						_ = json.Unmarshal([]byte(plain), &prev)
+			if r.Vault != nil && r.Vault.Enabled {
+				// 设了密码的服务器：改凭据必须先解锁，且仍用密码派生的密钥加密
+				key := s.vaultKey(r.ID)
+				if key == nil {
+					return nil, vaultNeedPassword(r)
+				}
+				prev, err := vaultCreds(key, r.Vault)
+				if err != nil {
+					prev = &Credentials{}
+				}
+				if in.Password != "" {
+					prev.Password = in.Password
+				}
+				if in.PrivateKey != "" {
+					prev.PrivateKey = in.PrivateKey
+				}
+				if in.Passphrase != "" {
+					prev.Passphrase = in.Passphrase
+				}
+				box, err := sealWithKey(key, encodeCreds(prev))
+				if err != nil {
+					return nil, err
+				}
+				r.Vault.Secret = *box
+				r.Vault.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			} else {
+				prev := Credentials{}
+				if len(r.Secret) > 0 {
+					var box SecretBox
+					if json.Unmarshal(r.Secret, &box) == nil {
+						if plain, err := s.Decrypt(&box); err == nil {
+							_ = json.Unmarshal([]byte(plain), &prev)
+						}
 					}
 				}
+				if in.Password != "" {
+					prev.Password = in.Password
+				}
+				if in.PrivateKey != "" {
+					prev.PrivateKey = in.PrivateKey
+				}
+				if in.Passphrase != "" {
+					prev.Passphrase = in.Passphrase
+				}
+				creds, _ := json.Marshal(prev)
+				box, err := s.Encrypt(string(creds))
+				if err != nil {
+					return nil, err
+				}
+				r.Secret, _ = json.Marshal(box)
 			}
-			if in.Password != "" {
-				prev.Password = in.Password
-			}
-			if in.PrivateKey != "" {
-				prev.PrivateKey = in.PrivateKey
-			}
-			if in.Passphrase != "" {
-				prev.Passphrase = in.Passphrase
-			}
-			creds, _ := json.Marshal(prev)
-			box, err := s.Encrypt(string(creds))
-			if err != nil {
-				return nil, err
-			}
-			r.Secret, _ = json.Marshal(box)
 		}
 		out, err := encodeFull(r)
 		if err != nil {
@@ -545,7 +566,11 @@ func (s *Store) RemoveServer(id string) (bool, error) {
 	if !found {
 		return false, nil
 	}
-	return true, s.writeRaw(out)
+	if err := s.writeRaw(out); err != nil {
+		return true, err
+	}
+	s.dropVaultKey(id)
+	return true, nil
 }
 
 func truncate(s string, n int) string {

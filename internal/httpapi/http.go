@@ -33,7 +33,7 @@ import (
 )
 
 // Version 与早期实现保持同一版本号，方便对照。
-const Version = "1.9.0"
+const Version = "1.9.2"
 
 // App 聚合全部依赖。
 type App struct {
@@ -86,15 +86,36 @@ func (e *errStatus) Error() string { return "" }
 
 func writeErr(w http.ResponseWriter, err error) {
 	var br *dbx.BadRequest
-	status := 500
-	if errors.As(err, &br) {
-		status = 400
-	}
+	var need *store.VaultNeedPassword
+	var bad *store.VaultBadPassword
+	var out *store.VaultLockedOut
 	msg := err.Error()
 	if msg == "" {
 		msg = "服务器内部错误"
 	}
-	writeJSON(w, status, map[string]string{"error": msg})
+	switch {
+	case errors.As(err, &bad):
+		// 密码错但还没到锁定次数
+		writeJSON(w, 400, map[string]any{
+			"error": msg, "code": "vault_bad_password", "remaining": bad.Remaining,
+		})
+	case errors.As(err, &out):
+		// 连续输错触发的锁定
+		writeJSON(w, 423, map[string]any{
+			"error": msg, "code": "vault_lockout",
+			"lockSeconds": out.Seconds, "remaining": 0,
+		})
+	case errors.As(err, &need):
+		// 设了密码但没解锁：前端据此弹解锁框
+		writeJSON(w, 423, map[string]any{
+			"error": msg, "code": "vault_locked",
+			"serverId": need.ServerID, "lockedUntil": need.LockedUntil,
+		})
+	case errors.As(err, &br):
+		writeJSON(w, 400, map[string]string{"error": msg})
+	default:
+		writeJSON(w, 500, map[string]string{"error": msg})
+	}
 }
 
 // readJSON 读请求体（带大小限制）。
@@ -424,6 +445,9 @@ func (app *App) getServerOrThrow(id string) (*store.ServerWithSecret, error) {
 	if server == nil {
 		return nil, errors.New("服务器不存在")
 	}
+	if server.Locked {
+		return nil, &store.VaultNeedPassword{ServerID: server.ID, Name: server.Name, LockedUntil: server.LockedUntil}
+	}
 	if server.Credentials == nil {
 		return nil, errors.New("该服务器的凭据读取失败，请重新编辑并填写密码或私钥")
 	}
@@ -541,6 +565,125 @@ func init() {
 		}
 		_ = app.Store.AppendLog(map[string]any{"type": "server.remove", "serverId": id, "result": result})
 		writeJSON(w, 200, map[string]any{"ok": ok})
+	})
+
+	// ------------------------------------------------------------ 本地加密
+	// 给单台服务器设一个本机密码：凭据改用密码派生的密钥加密，不校验强度，
+	// 连续 5 次输错锁 1 小时。详见 store/vault.go。
+
+	route("GET", "/api/servers/:id/vault", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
+		id, err := AssertID(p["id"], "")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		info, err := app.Store.VaultInfo(id)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if info == nil {
+			writeJSON(w, 404, map[string]string{"error": "服务器不存在"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"vault": info})
+	})
+
+	// POST 设置（首次）或修改（带 oldPassword）密码
+	route("POST", "/api/servers/:id/vault", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
+		id, err := AssertID(p["id"], "")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		body, err := readJSON(r, 0)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		password := str(body["password"])
+		old := str(body["oldPassword"])
+		var info *store.VaultInfo
+		action := "server.vault.set"
+		if old == "" {
+			info, err = app.Store.SetVaultPassword(id, password)
+		} else {
+			action = "server.vault.change"
+			info, err = app.Store.ChangeVaultPassword(id, old, password)
+		}
+		if err != nil {
+			_ = app.Store.AppendLog(map[string]any{"type": action, "serverId": id, "result": "error", "error": err.Error()})
+			writeErr(w, err)
+			return
+		}
+		_ = app.Store.AppendLog(map[string]any{"type": action, "serverId": id, "result": "ok"})
+		writeJSON(w, 200, map[string]any{"vault": info})
+	})
+
+	route("POST", "/api/servers/:id/vault/unlock", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
+		id, err := AssertID(p["id"], "")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		body, err := readJSON(r, 0)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		info, err := app.Store.UnlockVault(id, str(body["password"]))
+		if err != nil {
+			var bad *store.VaultBadPassword
+			var out *store.VaultLockedOut
+			result := "fail"
+			if errors.As(err, &bad) || errors.As(err, &out) {
+				result = "denied"
+			}
+			_ = app.Store.AppendLog(map[string]any{"type": "server.vault.unlock", "serverId": id, "result": result, "error": err.Error()})
+			writeErr(w, err)
+			return
+		}
+		_ = app.Store.AppendLog(map[string]any{"type": "server.vault.unlock", "serverId": id, "result": "ok"})
+		writeJSON(w, 200, map[string]any{"vault": info})
+	})
+
+	// 立即锁定：只清掉内存里的密钥，不动密码
+	route("POST", "/api/servers/:id/vault/lock", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
+		id, err := AssertID(p["id"], "")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		app.Store.LockVault(id)
+		info, err := app.Store.VaultInfo(id)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		_ = app.Store.AppendLog(map[string]any{"type": "server.vault.lock", "serverId": id, "result": "ok"})
+		writeJSON(w, 200, map[string]any{"vault": info})
+	})
+
+	// DELETE 关闭加密，需要当前密码
+	route("DELETE", "/api/servers/:id/vault", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
+		id, err := AssertID(p["id"], "")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		body, err := readJSON(r, 0)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		info, err := app.Store.RemoveVault(id, str(body["password"]))
+		if err != nil {
+			_ = app.Store.AppendLog(map[string]any{"type": "server.vault.remove", "serverId": id, "result": "error", "error": err.Error()})
+			writeErr(w, err)
+			return
+		}
+		_ = app.Store.AppendLog(map[string]any{"type": "server.vault.remove", "serverId": id, "result": "ok"})
+		writeJSON(w, 200, map[string]any{"vault": info})
 	})
 
 	route("POST", "/api/servers/:id/test", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {

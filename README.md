@@ -47,7 +47,8 @@ that you can still maintain with `vim` and `systemctl` when the panel is not aro
 | **Activity** | Append-only log of every operation, per server, with duration and result |
 | **Plugins** | Signed marketplace from `panel.wpqu.com`: install OpenClaw, Go, Python, Node.js or Docker on a server in one click. UI plugins add tabs to the panel itself. Free and paid are marked; paid ones use offline license keys |
 | **Self-update** | Check → verify Ed25519 signature and SHA256 → replace and restart. On Windows it renames the running binary and rolls back on failure |
-| **Interface** | Dark mode; English / 简体中文 switch; `?lang=en` deep link |
+| **Set password** *(optional)* | Per-server local encryption of stored credentials: passphrase-derived key (scrypt → AES-256-GCM), no strength check, 5 wrong attempts lock it for one hour, unlock lasts 30 minutes. The passphrase is never written to disk |
+| **Interface** | Light / dark toggle (two buttons); EN / 简体中文 switch; link to panel.wpqu.com in the sidebar; `?lang=en` deep link |
 
 Sites are managed through one abstraction, so an **nginx** box and an **Apache** box behave the same
 in the panel: the same buttons, the same dialogs, the right config paths underneath.
@@ -70,6 +71,12 @@ and sign release artifacts with `panel-go/cmd/wpqupack`.
 
 Self-hosting the feed is just static files: point `WPQU_UPDATE_BASE` at your own domain. You must sign
 with the same tooling, otherwise the panel refuses to install — by design.
+
+Those two CLIs are for scripts. If you'd rather click, the repo also ships a companion admin console,
+`panel-go/cmd/wpquadmin` (`./build.sh admin`): edit plugin manifests, pack and publish in one click,
+issue per-plugin keys and keep a ledger. It calls the same `internal/pack` and `internal/licensing`
+code, so artifacts are byte-identical to the CLI's. It listens on `127.0.0.1` only and is meant for
+whoever runs the feed — it does not talk to the panel.
 
 See [docs/GUIDE.md](docs/GUIDE.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -201,7 +208,7 @@ are Chinese; the UI language covers the panel's own interface.
 
 ## Project status
 
-Version 1.8.0. The panel is used daily against a handful of real Debian/Ubuntu servers, but treat it
+Version 1.9.2. The panel is used daily against a handful of real Debian/Ubuntu servers, but treat it
 as a one-maintainer project: the API may still change between minor versions, and release binaries
 are unsigned.
 

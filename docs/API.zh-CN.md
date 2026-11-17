@@ -16,7 +16,7 @@
 
 ```bash
 curl -s http://127.0.0.1:7788/api/ping
-# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.0"}
+# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.2"}
 
 curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 ```
@@ -64,6 +64,24 @@ curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 | GET | `/api/servers/:id/doctor` | — | `{ok, doctor:{checks:[…]}}` 只读体检 |
 | GET | `/api/servers/:id/overview` | — | 资源、版本、站点摘要 |
 | GET | `/api/servers/:id/site-detail` | `domain` | 单个站点：根目录、类型、PHP socket、SSL、占用、文件数 |
+
+### 服务器保险库（可选的按服务器本地加密）
+
+启用后，该服务器的凭据会用口令派生密钥（scrypt → AES-256-GCM）重加密。保险库未解锁时，
+需要凭据的接口返回 **HTTP 423**，响应带 `error` + `code`：`vault_locked`（需要解锁）、
+`vault_lockout`（错次过多锁定，带 `lockSeconds`）、`vault_bad_password`（口令错误，带
+`remaining`；连错 5 次锁 1 小时）。解锁成功后有 30 分钟会话。
+
+| 方法 | 路径 | 参数 | 返回 |
+|---|---|---|---|
+| GET | `/api/servers/:id/vault` | — | `{enabled, setAt}`（未启用时 `enabled:false`） |
+| POST | `/api/servers/:id/vault` | `password`；改密时另带 `oldPassword` | `{ok}` |
+| POST | `/api/servers/:id/vault/unlock` | `password` | `{ok}`（开启 30 分钟会话） |
+| POST | `/api/servers/:id/vault/lock` | — | `{ok}`（清掉内存密钥） |
+| DELETE | `/api/servers/:id/vault` | `password` | `{ok}`（凭据改回机器密钥加密） |
+
+注意：已加密服务器上 `PATCH /api/servers/:id` 同样要求先解锁（否则 423 `vault_need_password`）。
+`POST /api/servers/:id/test` 不涉及保险库状态。
 
 ## 站点
 

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WPQU 管理后台</title>
+<link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+
+<!-- 登录 -->
+<section id="login" class="login hidden">
+  <div class="login-card">
+    <div class="brand-mark">WPQU</div>
+    <h1>管理后台</h1>
+    <p class="muted">panel.wpqu.com 的内容与授权管理</p>
+    <form id="login-form" autocomplete="off">
+      <label class="field">
+        <span>口令</span>
+        <input id="login-pw" type="password" placeholder="管理员口令" autocomplete="current-password" required>
+      </label>
+      <button class="btn btn-primary btn-block" type="submit" id="login-btn">登录</button>
+      <p class="err" id="login-err"></p>
+    </form>
+    <p class="tiny muted">持续失败会触发限流。忘记口令：<code>-init -force -password 新口令</code></p>
+  </div>
+</section>
+
+<!-- 主界面 -->
+<div id="app" class="app hidden">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span>WPQU<span class="brand-sub">控制台</span></div>
+    <nav id="nav">
+      <a href="#/overview" data-route="overview">概览</a>
+      <a href="#/plugins" data-route="plugins">插件市场</a>
+      <a href="#/site" data-route="site">官网内容</a>
+      <a href="#/licenses" data-route="licenses">授权码</a>
+      <a href="#/updates" data-route="updates">升级发布</a>
+      <a href="#/audit" data-route="audit">审计日志</a>
+    </nav>
+    <div class="side-foot">
+      <a href="#/password" data-route="password">修改口令</a>
+      <button class="link" id="logout">退出</button>
+      <span class="tiny muted" id="ver"></span>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <h1 id="title">概览</h1>
+      <div id="hint" class="hint"></div>
+    </header>
+    <div id="view" class="view"><div class="loading">加载中…</div></div>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/admin.js"></script>
+</body>
+</html>

@@ -15,9 +15,11 @@
 import dicts from './dicts.js';
 
 export const LANGS = [
-  { code: 'zh-CN', label: '简体中文', short: '中' },
+  { code: 'zh-CN', label: '简体中文', short: 'CH' },
   { code: 'en', label: 'English', short: 'EN' },
 ];
+// 侧栏语言是 index.html 里写死的 CH / EN 两个按钮（按 data-lang 匹配）。
+// 真加第三门语言时，除了这里补一条，还要在 index.html 的 .seg 里补一个按钮。
 
 const STORE_KEY = 'wpqu-lang';
 const CJK = /[\u4e00-\u9fa5]/;
@@ -164,12 +166,6 @@ export function setLang(code) {
   location.reload();
 }
 
-/** 侧栏那个按钮：按 LANGS 顺序循环切换，加语种不用改按钮 */
-export function cycleLang() {
-  const i = LANGS.findIndex((l) => l.code === lang);
-  setLang(LANGS[(i + 1) % LANGS.length].code);
-}
-
 function translateTextNode(node) {
   const raw = node.nodeValue;
   if (!raw || !CJK.test(raw)) return;
@@ -209,11 +205,8 @@ export function initI18n() {
   document.documentElement.lang = lang;
   if (lang === 'zh-CN') return lang;
 
-  const btn = document.getElementById('btn-lang');
-  if (btn) {
-    btn.textContent = LANGS.find((l) => l.code === lang)?.short || 'EN';
-  }
-
+  // 侧栏语言按钮是固定的 CH / EN 两个，选中态由 app.js 按 currentLang() 标；
+  // 按钮上的拉丁字母本来就不进字典，这里不用做额外处理。
   translate(document.body);
 
   // 面板的界面是反复 innerHTML 重建的，观察器让新节点自动过一遍字典

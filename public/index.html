@@ -38,11 +38,25 @@
 
     <div class="side-foot">
       <div class="side-row">
-        <button class="btn btn-ghost btn-xs" id="btn-theme" title="切换深色 / 浅色">夜间模式</button>
-        <button class="btn btn-ghost btn-xs" id="btn-lang" title="切换语言 / Switch language">中</button>
+        <div class="seg" role="group" aria-label="外观">
+          <button class="seg-btn" data-theme-mode="light" title="浅色模式" aria-label="浅色模式" aria-pressed="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/></svg>
+          </button>
+          <button class="seg-btn" data-theme-mode="dark" title="深色模式" aria-label="深色模式" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 15.2A8.6 8.6 0 1 1 8.8 3.5a6.9 6.9 0 0 0 11.7 11.7Z"/></svg>
+          </button>
+        </div>
+        <div class="seg" role="group" aria-label="语言">
+          <button class="seg-btn seg-text" data-lang="zh-CN" title="简体中文" aria-pressed="true">CH</button>
+          <button class="seg-btn seg-text" data-lang="en" title="English" aria-pressed="false">EN</button>
+        </div>
       </div>
       <button class="btn btn-ghost btn-xs btn-version" id="btn-version" title="版本与更新">v…</button>
       <div class="hint">凭据加密存于本机<br>data/（AES-256-GCM）</div>
+      <a class="side-link" href="https://panel.wpqu.com/" target="_blank" rel="noopener" title="打开官网 panel.wpqu.com">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3.2a15 15 0 0 1 0 17.6 15 15 0 0 1 0-17.6Z"/></svg>
+        <span>官网</span><span class="side-link-host">panel.wpqu.com</span>
+      </a>
     </div>
   </aside>
 

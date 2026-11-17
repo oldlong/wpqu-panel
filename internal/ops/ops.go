@@ -189,6 +189,51 @@ echo "DBFLAVOR=$DB_FLAVOR"
 echo "DBVER=$DB_VER"
 echo "DBSVC=$DB_SVC"
 echo "NGINXTEST=$(nginx -t 2>&1 | tr '\n' ' ' | cut -c1-200)"
+# 网络环境：装包/下载脚本按这个结果挑软件源，这里给出同样的判断（共用 12 小时缓存）
+NR=$(sed -n 's/^REGION=//p' /var/lib/wpqu/net.env 2>/dev/null | head -1)
+NRTS=$(sed -n 's/^TS=//p' /var/lib/wpqu/net.env 2>/dev/null | head -1)
+case "$NRTS" in '' | *[!0-9]*) NRTS=0 ;; esac
+if [ -z "$NR" ] || [ $(($(date +%s) - NRTS)) -ge 43200 ]; then
+  NRD=$(mktemp -d 2>/dev/null)
+  if [ -n "$NRD" ]; then
+    ( curl -s -o /dev/null -m 2 -w '%{http_code} %{time_total}' https://mirrors.aliyun.com/ >"$NRD/a" 2>/dev/null ) &
+    ( curl -s -o /dev/null -m 2 -w '%{http_code} %{time_total}' https://mirrors.cloud.tencent.com/ >"$NRD/b" 2>/dev/null ) &
+    ( curl -s -o /dev/null -m 2 -w '%{http_code} %{time_total}' https://www.google.com/generate_204 >"$NRD/c" 2>/dev/null ) &
+    ( curl -s -r 0-2047 -o /dev/null -m 2 -w '%{http_code} %{time_total}' https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar >"$NRD/d" 2>/dev/null ) &
+    wait
+    CN=0; CNS=0; GL=0; GLS=0
+    for f in a b; do
+      code=000; t=9
+      read -r code t <"$NRD/$f" 2>/dev/null || true
+      if [ "${code:-000}" != "000" ]; then
+        CN=$((CN + 1))
+        CNS=$(awk -v x="$CNS" -v y="${t:-9}" 'BEGIN{printf "%.3f", x+y}')
+      fi
+    done
+    for f in c d; do
+      code=000; t=9
+      read -r code t <"$NRD/$f" 2>/dev/null || true
+      if [ "${code:-000}" != "000" ]; then
+        GL=$((GL + 1))
+        GLS=$(awk -v x="$GLS" -v y="${t:-9}" 'BEGIN{printf "%.3f", x+y}')
+      fi
+    done
+    rm -rf "$NRD"
+    if [ "$CN" -gt 0 ] && [ "$GL" -eq 0 ]; then
+      NR=cn
+    elif [ "$GL" -gt 0 ] && [ "$CN" -eq 0 ]; then
+      NR=global
+    elif [ "$CN" -gt 0 ] && [ "$GL" -gt 0 ]; then
+      NR=$(awk -v c="$CN" -v cs="$CNS" -v g="$GL" -v gs="$GLS" 'BEGIN{ print (gs/g < (cs/c)*0.8) ? "global" : "cn" }')
+    else
+      NR=unknown
+    fi
+    mkdir -p /var/lib/wpqu 2>/dev/null || true
+    printf 'TS=%s\nREGION=%s\n' "$(date +%s)" "$NR" >/var/lib/wpqu/net.env 2>/dev/null || true
+  fi
+fi
+[ -n "$NR" ] || NR=unknown
+echo "NETREGION=$NR"
 echo "LOGS=$(ls -1t /var/log/wp-*.log 2>/dev/null | head -5 | tr '\n' ',')"
 echo "__END__"
 `
@@ -404,6 +449,21 @@ func (r *Runner) Doctor(server sshc.Server) (*DoctorResult, error) {
 		certbotHint = "缺证书时 HTTPS 会被跳过，站点仍可用 HTTP"
 	}
 
+	// 网络环境决定装包与下载走哪个源：国内走阿里云/校园镜像，海外走官方源
+	netRegion := kv["NETREGION"]
+	netValue := "未识别"
+	netHint := ""
+	switch netRegion {
+	case "cn":
+		netValue = "国内 · 使用国内镜像"
+		netHint = "apt / pip / npm / GitHub 都走就近镜像；装包和建站会明显更快"
+	case "global":
+		netValue = "海外 · 使用官方源"
+		netHint = "直连官方源最快，脚本不会套国内镜像"
+	default:
+		netHint = "两组探测地址都不通，脚本会按官方源尝试；可在 /etc/wpqu/net.conf 里写 REGION=cn 或 global 强制指定"
+	}
+
 	memAvail := atoiSafe(kv["MEMAVAIL"])
 	resourceOk := memAvail > 250
 	resourceHint := ""
@@ -440,6 +500,7 @@ func (r *Runner) Doctor(server sshc.Server) (*DoctorResult, error) {
 			}
 			return "未安装"
 		}(), Hint: certbotHint},
+		{Key: "net", Label: "网络环境", OK: netRegion != "unknown", Value: netValue, Hint: netHint},
 		{Key: "resource", Label: "资源", OK: resourceOk, Value: resourceValue, Hint: resourceHint},
 	}
 

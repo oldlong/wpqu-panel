@@ -418,6 +418,12 @@ WS_NAME=$(ws_name)
 
 WEB_ROOT="/var/www/${DOMAIN}"
 NGINX_CONF=$(ws_conf "$DOMAIN")
+# 站点目录以配置里的 root / DocumentRoot 为准：目录名不一定等于域名
+# （例如 pc5000.com 的 root 是 /var/www/pc5000），按域名硬拼会漏删真实目录。
+CONF_ROOT=$(ws_root_of "$NGINX_CONF" 2>/dev/null || true)
+if [[ -n "$CONF_ROOT" && -d "$CONF_ROOT" ]]; then
+  WEB_ROOT="${CONF_ROOT%/}"
+fi
 NGINX_LINK=$(ws_link "$DOMAIN")
 SNIPPET="/etc/nginx/snippets/site-${DOMAIN}.conf"
 TYPE_FILE=$(ws_type_file "$DOMAIN")
@@ -520,9 +526,18 @@ fi
 
 section "数据库"
 
+# 面板没传库名不等于「这个站没有库」：以前这里直接跳过，勾了删库却什么都没删，
+# 库和账号就永久躺在机器上。现在自己从 wp-config.php 读一次。
+DB_OWNER=""
+if [[ "$DELETE_DB" == "1" && -z "$DB_NAME" && -f "${WEB_ROOT}/wp-config.php" ]]; then
+  DB_NAME=$(awk -F"'" '/DB_NAME/ {print $4; exit}' "${WEB_ROOT}/wp-config.php" 2>/dev/null || true)
+  DB_OWNER=$(awk -F"'" '/DB_USER/ {print $4; exit}' "${WEB_ROOT}/wp-config.php" 2>/dev/null || true)
+  [[ -n "$DB_NAME" ]] && info "从 wp-config.php 读到库名：${DB_NAME}（账号 ${DB_OWNER:-未知}）"
+fi
+
 if [[ "$DELETE_DB" == "1" ]]; then
   if [[ -z "$DB_NAME" ]]; then
-    warn "没有提供数据库名，跳过删库"
+    warn "没有提供数据库名，也没有 wp-config.php 可读，跳过删库"
   elif ! [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]]; then
     warn "数据库名不合法（${DB_NAME}），跳过"
   elif [[ "$DB_NAME" =~ ^(mysql|information_schema|performance_schema|sys)$ ]]; then
@@ -534,6 +549,19 @@ if [[ "$DELETE_DB" == "1" ]]; then
     else
       if "$DB_CLI" -e "DROP DATABASE IF EXISTS \`${DB_NAME}\`;" 2>"${TMPD}/dberr"; then
         ok "数据库 ${DB_NAME} 已删除"
+        # 顺手清掉这个站专用的库账号：只在它没有别的库权限时才删。
+        # 老站（比如几个站共用 wordpress + wpuser）绝不能动，否则删一个站把邻居搞挂。
+        if [[ -n "$DB_OWNER" && "$DB_OWNER" =~ ^[A-Za-z0-9_]+$ ]]; then
+          OTHERS=$("$DB_CLI" -N -B -e "SELECT COUNT(*) FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE = \"'${DB_OWNER}'@'localhost'\" AND TABLE_SCHEMA <> '${DB_NAME}'" 2>/dev/null || echo 0)
+          case "$OTHERS" in '' | *[!0-9]*) OTHERS=0 ;; esac
+          if [[ "$OTHERS" -gt 0 ]]; then
+            info "账号 ${DB_OWNER} 还管着别的库，保留"
+          elif "$DB_CLI" -e "DROP USER IF EXISTS '${DB_OWNER}'@'localhost';" 2>"${TMPD}/dberr"; then
+            ok "账号 ${DB_OWNER} 已删除"
+          else
+            warn "删除账号 ${DB_OWNER} 失败：$(tr '\n' ' ' < "${TMPD}/dberr")"
+          fi
+        fi
       else
         warn "删除数据库失败：$(tr '\n' ' ' < "${TMPD}/dberr")"
       fi
@@ -548,7 +576,7 @@ fi
 section "站点目录"
 
 if [[ "$DELETE_FILES" == "1" ]]; then
-  if [[ "$WEB_ROOT" != "/var/www/${DOMAIN}" ]]; then
+  if [[ "$WEB_ROOT" != /var/www/* || "$WEB_ROOT" == "/var/www" || "$WEB_ROOT" == "/var/www/" ]]; then
     die "目录路径异常（${WEB_ROOT}），拒绝删除"
   elif [[ -L "$WEB_ROOT" ]]; then
     warn "${WEB_ROOT} 是软链接，跳过（请手工确认它指向哪里）"

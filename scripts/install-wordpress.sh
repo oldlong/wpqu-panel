@@ -18,7 +18,7 @@
 #   ADMIN_PASS        后台密码，留空则自动生成
 #   ADMIN_EMAIL       管理员邮箱，默认 admin@$DOMAIN
 #   WP_LOCALE         zh_CN 或 en_US，默认 zh_CN
-#   DB_NAME/DB_USER   数据库名/用户，默认 wordpress / wpuser
+#   DB_NAME/DB_USER   数据库名/用户，默认按域名派生：wp_<片段> / u_<片段>
 #   DB_PASS           数据库密码，留空则自动生成
 #   WEB_SERVER        Web 服务器：nginx（默认）或 apache
 #                     apache = Apache 2.4 + mpm_event + php-fpm（不是 mod_php）
@@ -527,8 +527,11 @@ ADMIN_USER="${ADMIN_USER:-admin}"
 ADMIN_PASS="${ADMIN_PASS:-}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 WP_LOCALE="${WP_LOCALE:-zh_CN}"
-DB_NAME="${DB_NAME:-wordpress}"
-DB_USER="${DB_USER:-wpuser}"
+# 库名与账号按域名派生（见下方 DOMAIN 规范化之后），这里不能用固定名字：
+# 同一台机器上装第二个站时，固定名会让两个站共用一个库，还会把库账号密码改掉，
+# 已有站点会立刻数据库连接失败。留空表示「跟着域名走」。
+DB_NAME="${DB_NAME:-}"
+DB_USER="${DB_USER:-}"
 DB_PASS="${DB_PASS:-}"
 WEB_SERVER="${WEB_SERVER:-nginx}"
 PHP_VERSION="${PHP_VERSION:-}"
@@ -569,6 +572,16 @@ fi
 [[ -n "$DOMAIN" ]] || die "必须提供域名。示例：DOMAIN=example.com bash $0"
 DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
 [[ -n "$ADMIN_EMAIL" ]] || ADMIN_EMAIL="admin@$DOMAIN"
+
+# 库名与账号默认跟域名走：wp_<域名片段> / u_<域名片段>。
+# 固定成 wordpress / wpuser 会让同机的第二个站直接写进第一个站的库，
+# 还会 ALTER 掉它的账号密码，把已有站点整挂。
+if [[ -z "$DB_NAME" || -z "$DB_USER" ]]; then
+  SAFE_NAME="${DOMAIN//[.-]/_}"
+  SAFE_NAME="${SAFE_NAME:0:12}"
+  [[ -n "$DB_NAME" ]] || DB_NAME="wp_${SAFE_NAME}"
+  [[ -n "$DB_USER" ]] || DB_USER="u_${SAFE_NAME}"
+fi
 
 # WordPress 的 is_email() 要求域名含点且顶级域至少 2 位，单段主机名会直接失败
 if ! [[ "$ADMIN_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[A-Za-z]{2,}$ ]]; then
@@ -1344,11 +1357,26 @@ if ! "$DB_CLI" -e 'SELECT 1' >/dev/null 2>&1; then
 fi
 db_admin() { "$DB_CLI" "${DB_ADMIN_OPTS[@]}" "$@"; }
 
+# 两道护栏，防止把已有站点踩掉：
+#   1. 目标库已有表 → 那是别的站点在用，停手；
+#   2. 目标账号已存在 → 不改它的密码（一改，用这个账号的站点立刻连不上库）。
+EXIST_TABLES=$(db_admin -N -B -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${DB_NAME}'" 2>/dev/null || echo 0)
+if [[ "${EXIST_TABLES:-0}" -gt 0 ]]; then
+  die "数据库 ${DB_NAME} 已存在且包含 ${EXIST_TABLES} 张表，很可能是别的站点在用。
+    换个域名，或用 DB_NAME=新库名 指定一个空库。两个站共用一个库会把数据混在一起。"
+fi
+EXIST_USER=$(db_admin -N -B -e "SELECT COUNT(*) FROM mysql.user WHERE user='${DB_USER}' AND host='localhost'" 2>/dev/null || echo 0)
+if [[ "${EXIST_USER:-0}" != "0" ]]; then
+  die "数据库账号 ${DB_USER} 已存在。为避免改掉别的站点正在用的密码，这里不再继续。
+    用 DB_USER=新账号名 指定一个账号，或换个域名。"
+fi
+
 db_admin -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
   || die "创建数据库失败，检查 ${DB_LABEL} 是否正常运行"
-db_admin -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';"
-db_admin -e "ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';"
-db_admin -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'; FLUSH PRIVILEGES;"
+db_admin -e "CREATE USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';" \
+  || die "创建数据库账号 ${DB_USER} 失败"
+db_admin -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'; FLUSH PRIVILEGES;" \
+  || die "授权失败：${DB_USER} → ${DB_NAME}"
 DB_FULL_VERSION=$(db_admin -N -B -e 'SELECT VERSION()' 2>/dev/null | head -1)
 ok "数据库 ${DB_NAME} / 用户 ${DB_USER} 已就绪（${DB_LABEL} ${DB_FULL_VERSION}）"
 

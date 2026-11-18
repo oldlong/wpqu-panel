@@ -4,6 +4,43 @@
 
 Notable changes, newest first. Versions are the value returned by `/api/ping`.
 
+## 1.9.3
+
+**Three high-severity problems in one-step install and plugins**
+
+- The database name and user for one-step install are now derived from the domain
+  (`wp_<fragment>` / `u_<fragment>`). They used to be hardcoded to `wordpress` / `wpuser`, so a second
+  site on the same host reused the old database and reset the account's password, leaving the first
+  site unable to connect
+- Two guards before creating a database: stop if it already holds tables, stop if the user already
+  exists (no more `ALTER USER` on someone else's account)
+- The PHP page's site list is fixed: `ws_init` was called before the function was defined, so the list
+  was always empty and removing a PHP version in use was not blocked (a purge would 502 every site on it)
+- The Typecho plugin (1.0.1) no longer removes every config when uninstalling by globbing
+  `typecho-*.conf`: the installer records SLUG/WEBROOT in `/etc/wpqu/typecho/<slug>.env` and uninstall
+  removes only that one; older installs without the state file are resolved from the web root, and if
+  that fails the configs are listed for you to handle by hand
+
+**Other fixes**
+
+- Overview now fills in the database version and flavour (`mariadb` / `dbFlavor`), which were always empty
+- The local password is now **at least 6 characters** (length only, no character rules) — a single digit
+  used to be accepted, which barely guards the root credentials
+- A forgotten local password can be **reset**: the password and the stored SSH credentials are cleared
+  together, so you just fill them in once instead of waiting out the lock or re-adding the server
+- Deleting a site with "drop database" but without a database name now reads the name from
+  `wp-config.php`, and drops the site's dedicated database user afterwards (kept when it has access to
+  other databases, so the shared legacy `wpuser` is safe)
+- Certificate failures now diagnose from **this run's** certbot output (`/var/log/wp-ssl-*.log`) instead
+  of whatever an earlier operation left in `wp-maint.log`
+- Database exports and backups use local time in filenames (UTC put them 8 hours behind); backup steps no
+  longer hardcode `[1/4]…[4/4]`, so database-only backups do not skip numbers
+- `cron/run` works with just a line number (the command is read from crontab); cron entries now always
+  carry a string `id`, with non-panel entries named `line-<n>`
+- English errors from the file API (`file does not exist`, `permission denied`, …) are translated
+- Log tail occasionally returned nothing on the first try: it now retries once and falls back to the raw
+  content when the separator is missing
+
 ## Admin console 1.0 (separate tool, versioned independently)
 
 New `wpquadmin` — a localhost-only web console for whoever runs the distribution site:

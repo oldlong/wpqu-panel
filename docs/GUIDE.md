@@ -492,7 +492,7 @@ not download again.
 
 ## 15. Updates
 
-The `v1.9.2` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
+The `v1.9.3` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
 current version, the update check, and the release notes.
 
 ### When it checks

@@ -16,7 +16,7 @@
 
 ```bash
 curl -s http://127.0.0.1:7788/api/ping
-# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.2"}
+# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.3"}
 
 curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 ```
@@ -78,7 +78,10 @@ curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 | POST | `/api/servers/:id/vault` | `password`；改密时另带 `oldPassword` | `{ok}` |
 | POST | `/api/servers/:id/vault/unlock` | `password` | `{ok}`（开启 30 分钟会话） |
 | POST | `/api/servers/:id/vault/lock` | — | `{ok}`（清掉内存密钥） |
+| POST | `/api/servers/:id/vault/reset` | `confirm: true` | `{vault:{enabled:false}, needsCreds:true}`：忘密码时用，口令与凭据一起清掉，之后必须重新填 SSH 凭据；锁定期也能调 |
 | DELETE | `/api/servers/:id/vault` | `password` | `{ok}`（凭据改回机器密钥加密） |
+
+口令只校验长度（≥ 6 位），不限制字符种类。
 
 注意：已加密服务器上 `PATCH /api/servers/:id` 同样要求先解锁（否则 423 `vault_need_password`）。
 `POST /api/servers/:id/test` 不涉及保险库状态。

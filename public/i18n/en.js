@@ -853,10 +853,31 @@ export default {
     'The password lives only in your head: the panel stores neither the password nor any way to recover it. You enter it once per panel start; 5 wrong tries lock it for an hour.',
   '忘了原密码就关不掉加密，只能移除这台服务器后重新添加':
     'Without the current password you cannot turn encryption off — remove the server and add it again',
-  '不校验强度，几位数字也可以': 'No strength rules — a few digits is fine',
-  '不校验长度与复杂度 —— 防的是顺手拿到这台电脑的人，不是暴力破解':
-    'No length or complexity rules — this guards against someone casually using this computer, not a brute force attack',
-  '随便设，几位数字也行': 'Anything works, a few digits is fine',
+  '忘了原密码：先「关闭加密」是做不到的，用下面的「忘记密码」重置':
+    'Lost the password? "Disable encryption" needs it too — use "Forgot password" below to reset',
+  '只要求长度，不限制字符种类 —— 防的是顺手拿到这台电脑的人，不是暴力破解':
+    'Length only, no character rules — this guards against someone casually using this computer, not a brute force attack',
+  '只要求长度，不限制字符种类': 'Length only, no character rules',
+  '至少 6 位': 'At least 6 characters',
+  '密码至少 6 位': 'Password must be at least 6 characters',
+  '新密码至少 6 位': 'The new password must be at least 6 characters',
+  '忘了密码，重置': 'Forgot the password — reset',
+  '忘记密码': 'Forgot password',
+  '忘记密码，重置': 'Forgot password — reset',
+  '真忘了密码：可以重置，代价是面板里保存的 SSH 凭据会被一起清掉，需要重新填一次。':
+    'Really lost it? You can reset, but the SSH credentials stored by the panel are wiped with it and must be entered again.',
+  '重置本地密码': 'Reset local password',
+  '重置会连同面板保存的这台服务器的 SSH 密码 / 私钥一起删掉。':
+    'Resetting also deletes the SSH password / private key this panel stored for the server.',
+  '凭据本来就只有你的密码能解开，没有密码谁也解不开，只能重新填一次。':
+    'The credentials can only be opened with your password, so without it the only option is to enter them again.',
+  '重置后这台服务器会提示「没有可用凭据」，在右上角「编辑」里重新填密码或私钥即可恢复，站点和数据都不受影响。':
+    'Afterwards the server reports "no usable credentials" — refill the password or key under Edit in the top right, and sites and data are unaffected.',
+  '确认重置': 'Reset anyway',
+  '已重置，请重新填写 SSH 凭据': 'Reset. Please re-enter the SSH credentials',
+  '已重置本地密码': 'Local password reset',
+  '这台服务器的 SSH 凭据已清除。点右上角「编辑」重新填一次密码或私钥就能继续操作，站点和数据都不受影响。':
+    'The SSH credentials for this server were cleared. Refill the password or key under Edit in the top right to continue; sites and data are unaffected.',
   '锁定期间不接受任何密码尝试，重启面板也不会解除。到时间后重新进来输入密码即可。':
     'No password attempts are accepted while locked, and restarting the panel does not lift it. Come back after the countdown and unlock again.',
 

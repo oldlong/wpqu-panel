@@ -20,7 +20,8 @@ import (
 // data 目录的人也读不到凭据，必须有密码。
 //
 // 密码本身不落盘（只存 salt 与一个验证器），所以忘了就真的找不回来。
-// 按需求不校验密码强度（几位数字也放行），安全性靠「连续 5 次错误锁 1 小时」兜着：
+// 不校验复杂度（大小写数字符号一概不管），只要求至少 VaultMinPasswordLen 位：
+// 这里守的是 root 凭据，三位数字等于没设。安全性主要靠「连续 5 次错误锁 1 小时」兜着：
 // 计数与锁定时间都写进 servers.json，重启面板不会清零。
 //
 // 解锁后的密钥只在内存里留 30 分钟（每次使用续期），面板一重启就要重新输。
@@ -28,6 +29,8 @@ import (
 const (
 	// VaultMaxFails 连续输错几次触发锁定
 	VaultMaxFails = 5
+	// VaultMinPasswordLen 密码最短长度（只限长度，不限字符种类）
+	VaultMinPasswordLen = 6
 	// VaultLockDuration 一次锁定多久
 	VaultLockDuration = time.Hour
 	// vaultKeyTTL 解锁后密钥在内存里的存活时间（每次使用会续期）
@@ -341,6 +344,17 @@ func (s *Store) vaultCheck(raws []json.RawMessage, idx int, r *ServerRecord, pas
 
 // ---------------------------------------------------------------- 对外操作
 
+// checkVaultPassword 只管长度：这里守的是 root 凭据，太短等于没设。
+func checkVaultPassword(pw string) error {
+	if strings.TrimSpace(pw) == "" {
+		return errors.New("请输入密码")
+	}
+	if n := len([]rune(pw)); n < VaultMinPasswordLen {
+		return fmt.Errorf("密码太短，至少 %d 位", VaultMinPasswordLen)
+	}
+	return nil
+}
+
 // VaultInfo 返回某台服务器的加密状态；服务器不存在时返回 nil。
 func (s *Store) VaultInfo(id string) (*VaultInfo, error) {
 	s.mu.Lock()
@@ -372,10 +386,10 @@ func (s *Store) VaultInfo(id string) (*VaultInfo, error) {
 }
 
 // SetVaultPassword 给服务器加密码：凭据改成用密码派生的密钥加密。
-// 不校验强度，只要求非空。
+// 只校验长度（≥ VaultMinPasswordLen），不限制字符种类。
 func (s *Store) SetVaultPassword(id, password string) (*VaultInfo, error) {
-	if strings.TrimSpace(password) == "" {
-		return nil, errors.New("请输入密码")
+	if err := checkVaultPassword(password); err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -426,8 +440,8 @@ func (s *Store) SetVaultPassword(id, password string) (*VaultInfo, error) {
 
 // ChangeVaultPassword 改密码：验原密码 → 用新密码重新加密凭据。
 func (s *Store) ChangeVaultPassword(id, oldPassword, newPassword string) (*VaultInfo, error) {
-	if strings.TrimSpace(newPassword) == "" {
-		return nil, errors.New("请输入新密码")
+	if err := checkVaultPassword(newPassword); err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -512,6 +526,32 @@ func (s *Store) RemoveVault(id, password string) (*VaultInfo, error) {
 	}
 	r.Secret = raw
 	r.Vault = nil
+	if err := s.saveRecord(raws, idx, r); err != nil {
+		return nil, err
+	}
+	s.dropVaultKey(id)
+	return &VaultInfo{Enabled: false}, nil
+}
+
+// ResetVault 是忘记密码时最后的办法：把密码和凭据一起丢掉，之后必须重新填 SSH 凭据。
+// 为什么允许在锁定期做：锁定只是防止暴力猜密码，而重置什么都拿不到（凭据本来就用
+// 密码加密着，重置等于销毁），代价是用户得重新录入，不会泄露任何秘密。
+func (s *Store) ResetVault(id string) (*VaultInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raws, err := s.rawServers()
+	if err != nil {
+		return nil, err
+	}
+	idx, r, ok := findRecord(raws, id)
+	if !ok {
+		return nil, errors.New("服务器不存在")
+	}
+	if r.Vault == nil || !r.Vault.Enabled {
+		return nil, errors.New("该服务器没有设置本地密码")
+	}
+	r.Vault = nil
+	r.Secret = nil
 	if err := s.saveRecord(raws, idx, r); err != nil {
 		return nil, err
 	}

@@ -278,6 +278,25 @@ func (r *Runner) LogTail(server sshc.Server, target string, lines int) (string, 
 	if lines > 2000 {
 		lines = 2000
 	}
+	// 第一次调用偶尔拿不到分隔线（连接刚建立时的老问题），重试一次就稳了；
+	// 仍然拿不到时把内容原样返回，总比给用户一个空面板强。
+	for attempt := 0; attempt < 2; attempt++ {
+		text, marker, err := r.logTailOnce(server, target, lines)
+		if err != nil {
+			return "", err
+		}
+		if marker {
+			return text, nil
+		}
+		if attempt == 1 {
+			return text, nil
+		}
+	}
+	return "", nil
+}
+
+// logTailOnce 跑一次 logs.sh tail，返回（内容, 是否拿到了分隔线）。
+func (r *Runner) logTailOnce(server sshc.Server, target string, lines int) (string, bool, error) {
 	env := map[string]string{
 		"LOG_ACTION": "tail",
 		"LOG_TARGET": target,
@@ -285,16 +304,25 @@ func (r *Runner) LogTail(server sshc.Server, target string, lines int) (string, 
 	}
 	res, err := r.RunUploadedScript(server, "logs.sh", env, nil, 60*time.Second)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	out := StripANSI(res.Stdout)
+	out := strings.ReplaceAll(StripANSI(res.Stdout), "\r\n", "\n")
 	if res.Code != 0 {
-		return "", fmt.Errorf("%s", errText(res, "读取日志失败"))
+		return "", false, fmt.Errorf("%s", errText(res, "读取日志失败"))
 	}
-	if idx := strings.Index(out, "---8<---\n"); idx >= 0 {
-		return out[idx+len("---8<---\n"):], nil
+	if idx := strings.Index(out, "---8<---"); idx >= 0 {
+		body := out[idx+len("---8<---"):]
+		return strings.TrimPrefix(body, "\n"), true, nil
 	}
-	return "", nil
+	// 没有分隔线：去掉脚本自己的状态行，剩下的当内容
+	var kept []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "PANEL_") {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return strings.TrimLeft(strings.Join(kept, "\n"), "\n"), false, nil
 }
 
 // LogAction 清空 / 轮转 / 删除归档。
@@ -424,11 +452,18 @@ func ParseCronStatus(out string) *CronStatus {
 				continue
 			}
 			n, _ := strconv.Atoi(parts[0])
+			// 非面板创建的任务在 crontab 里没有标记注释，本来 id 是空串。
+			// 空串在前端不好当 key（"" 与数字 id 混着用），这里统一成 line-<行号>：
+			// 类型恒为字符串，删的时候按前缀还原成行号即可。
+			id := parts[3]
+			if id == "" {
+				id = "line-" + parts[0]
+			}
 			st.Entries = append(st.Entries, CronEntry{
 				Line:     n,
 				Enabled:  parts[1] == "1",
 				Managed:  parts[2] == "1",
-				ID:       parts[3],
+				ID:       id,
 				Schedule: decodeB64(parts[4]),
 				Command:  decodeB64(parts[5]),
 				Label:    decodeB64(parts[6]),

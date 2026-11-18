@@ -761,15 +761,18 @@ func (r *Runner) DeleteSite(server sshc.Server, p DeleteSiteParams, onData func(
 	}, onData, 10*time.Minute)
 }
 
-// IssueCert 申请证书。
-func (r *Runner) IssueCert(server sshc.Server, domain, email string, onData func(string)) (*sshc.Result, error) {
-	if email == "" {
-		email = "admin@" + domain
-	}
-	cmd := fmt.Sprintf(
-		`command -v certbot >/dev/null 2>&1 || { echo "certbot 未安装，正在安装..."; apt-get install -y certbot python3-certbot-nginx; } && certbot --nginx -d %s --non-interactive --agree-tos --redirect --email %s 2>&1`,
-		sshc.ShellQuote(domain), sshc.ShellQuote(email),
-	)
+// certbotRun 在远端跑 certbot，并把本次输出落到 /var/log/wp-ssl-<时间>-<pid>.log。
+// 为什么要落日志：失败时 ReportFailure 会把「这次的日志」贴出来；以前 certbot 直接
+// 裸奔，诊断只能翻到上一次别的操作写进 /var/log/wp-maint.log 的内容，指向完全无关的故障。
+// 不用管道（| tee）是为了保住退出码 —— 面板靠它判断成功失败，而 sh 里没有 PIPESTATUS。
+func (r *Runner) certbotRun(server sshc.Server, inner string, onData func(string)) (*sshc.Result, error) {
+	cmd := `LOG=/var/log/wp-ssl-$(date +%Y%m%d-%H%M%S)-$$.log
+mkdir -p /var/log
+{ ` + inner + `
+} > "$LOG" 2>&1
+RC=$?
+cat "$LOG"
+exit $RC`
 	return r.Pool.Exec(server, sshc.WithRoot(server, cmd), &sshc.ExecOptions{
 		Timeout: 10 * time.Minute,
 		OnData: func(text string, _ bool) {
@@ -780,16 +783,22 @@ func (r *Runner) IssueCert(server sshc.Server, domain, email string, onData func
 	})
 }
 
+// IssueCert 申请证书。
+func (r *Runner) IssueCert(server sshc.Server, domain, email string, onData func(string)) (*sshc.Result, error) {
+	if email == "" {
+		email = "admin@" + domain
+	}
+	inner := fmt.Sprintf(
+		`command -v certbot >/dev/null 2>&1 || { echo "certbot 未安装，正在安装..."; apt-get install -y certbot python3-certbot-nginx; }
+certbot --nginx -d %s --non-interactive --agree-tos --redirect --email %s`,
+		sshc.ShellQuote(domain), sshc.ShellQuote(email),
+	)
+	return r.certbotRun(server, inner, onData)
+}
+
 // RenewCerts 续期全部证书。
 func (r *Runner) RenewCerts(server sshc.Server, onData func(string)) (*sshc.Result, error) {
-	return r.Pool.Exec(server, sshc.WithRoot(server, "certbot renew --nginx --non-interactive 2>&1"), &sshc.ExecOptions{
-		Timeout: 10 * time.Minute,
-		OnData: func(text string, _ bool) {
-			if onData != nil {
-				onData(text)
-			}
-		},
-	})
+	return r.certbotRun(server, "certbot renew --nginx --non-interactive", onData)
 }
 
 // ---------------------------------------------------------------- 备份
@@ -804,11 +813,15 @@ type BackupFile struct {
 }
 
 // BackupSite 打包并下载站点（数据库 + 文件）。
-func (r *Runner) BackupSite(server sshc.Server, domain string, includeDb, includeFiles bool, onData func(string)) ([]BackupFile, error) {
-	stamp := time.Now().UTC().Format("20060102150405")
+// root 是站点真实根目录（由 sites.SiteRoot 解析）；为空时退回 /var/www/<域名>，
+// 那只在“目录名等于域名”的站点上成立。
+func (r *Runner) BackupSite(server sshc.Server, domain, root string, includeDb, includeFiles bool, onData func(string)) ([]BackupFile, error) {
+	// 文件名用本机时间：用户按「刚才备份的那份」找文件，UTC 会差 8 小时
+	stamp := time.Now().Format("20060102150405")
 	remoteDir := fmt.Sprintf("/tmp/wp-panel-backup-%s", stamp)
 
-	onData(fmt.Sprintf("[1/4] 正在远端打包 %s ...\n", domain))
+	// 步骤不写死序号：只备份数据库时本该是 2 步，写死 1/4、2/4、4/4 会跳号
+	onData(fmt.Sprintf("→ 正在远端打包 %s ...\n", domain))
 
 	dbFlag, filesFlag := "0", "0"
 	if includeDb {
@@ -818,26 +831,38 @@ func (r *Runner) BackupSite(server sshc.Server, domain string, includeDb, includ
 		filesFlag = "1"
 	}
 
+	if root == "" {
+		root = "/var/www/" + domain
+	}
+
 	script := `
 set -e
 DB_CLI=$(command -v mariadb || command -v mysql || true)
 DB_DUMP=$(command -v mariadb-dump || command -v mysqldump || true)
-ROOT=` + sshc.ShellQuote("/var/www/"+domain) + `
+ROOT=` + sshc.ShellQuote(root) + `
 OUT=` + sshc.ShellQuote(remoteDir) + `
 rm -rf "$OUT"
 mkdir -p "$OUT"
+[ -d "$ROOT" ] || { echo "ROOT_NOT_FOUND=$ROOT"; exit 2; }
 echo "SIZE_BEFORE=$(du -sh "$ROOT" 2>/dev/null | cut -f1)"
 if [ "` + dbFlag + `" = "1" ] && [ -f "$ROOT/wp-config.php" ]; then
   DB=$(awk -F"'" '/DB_NAME/ {print $4; exit}' "$ROOT/wp-config.php")
   if [ -n "$DB" ]; then
     echo "DUMPING_DB=$DB"
     [ -n "$DB_DUMP" ] || { echo "服务器上找不到 mariadb-dump / mysqldump" >&2; exit 127; }
-    "$DB_DUMP" --single-transaction --quick --default-character-set=utf8mb4 "$DB" | gzip > "$OUT/db.sql.gz"
+    if ! "$DB_DUMP" --single-transaction --quick --default-character-set=utf8mb4 "$DB" > "$OUT/db.sql" 2>"$OUT/db.err"; then
+      echo "DB_DUMP_FAIL=$(tr -d '\r' < "$OUT/db.err" | head -c 200)"; exit 3
+    fi
+    gzip -f "$OUT/db.sql"
+    rm -f "$OUT/db.err"
   fi
 fi
 if [ "` + filesFlag + `" = "1" ]; then
   echo "PACKING_FILES"
-  tar czf "$OUT/files.tar.gz" -C "$ROOT" --exclude=wp-content/cache --exclude=wp-content/upgrade --exclude=wp-content/ai1wm-backups . 2>/dev/null
+  if ! tar czf "$OUT/files.tar.gz" -C "$ROOT" --exclude=wp-content/cache --exclude=wp-content/upgrade --exclude=wp-content/ai1wm-backups . 2>"$OUT/tar.err"; then
+    echo "TAR_FAIL=$(tr -d '\r' < "$OUT/tar.err" | head -c 200)"; exit 4
+  fi
+  rm -f "$OUT/tar.err"
 fi
 ls -l "$OUT"
 `
@@ -848,11 +873,11 @@ ls -l "$OUT"
 	for _, line := range strings.Split(res.Stdout, "\n") {
 		switch {
 		case strings.HasPrefix(line, "SIZE_BEFORE="):
-			onData(fmt.Sprintf("[1/4] 站点体积：%s\n", strings.TrimPrefix(line, "SIZE_BEFORE=")))
+			onData(fmt.Sprintf("→ 站点体积：%s\n", strings.TrimPrefix(line, "SIZE_BEFORE=")))
 		case strings.HasPrefix(line, "DUMPING_DB="):
-			onData(fmt.Sprintf("[2/4] 导出数据库 %s\n", strings.TrimPrefix(line, "DUMPING_DB=")))
+			onData(fmt.Sprintf("→ 导出数据库 %s\n", strings.TrimPrefix(line, "DUMPING_DB=")))
 		case line == "PACKING_FILES":
-			onData("[3/4] 打包站点文件 ...\n")
+			onData("→ 打包站点文件 ...\n")
 		}
 	}
 	if res.Code != 0 {
@@ -892,7 +917,7 @@ ls -l "$OUT"
 		if st, err := r.Pool.StatPath(server, remotePath); err == nil {
 			size = st.Size
 		}
-		onData(fmt.Sprintf("[4/4] 下载 %s（%s）...\n", file, FormatSize(size)))
+		onData(fmt.Sprintf("→ 下载 %s（%s）...\n", file, FormatSize(size)))
 		if err := r.Pool.DownloadToFile(server, remotePath, localPath, func(received int64) {
 			if size > 0 && received%(1024*1024) < 65536 {
 				pct := received * 100 / size
@@ -971,6 +996,8 @@ var logPatterns = map[string]string{
 	"site.domain":      "wp-domain-change-",
 	"site.delete":      "wp-delsite-",
 	"server.bootstrap": "wp-deploy-",
+	"ssl.issue":        "wp-ssl-",
+	"ssl.renew":        "wp-ssl-",
 }
 
 // ReportFailure 失败时把远端日志尾部灌进输出。

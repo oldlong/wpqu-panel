@@ -64,6 +64,9 @@ fi
 echo "WPCOUNT=$(ls -d /var/www/*/wp-config.php 2>/dev/null | wc -l)"
 echo "CERTBOT=$(command -v certbot >/dev/null 2>&1 && echo 1 || echo 0)"
 echo "WPSUDO=$(id -u)"
+# 概览页的「数据库」两格读的是下面这两个键：前端要版本号，后端要品类名
+echo "MYSQL=${DB_VER}"
+echo "DBFLAVOR=${DB_FLAVOR}"
 `
 
 const sitesScript = `
@@ -352,6 +355,32 @@ func daysUntil(dateStr string) (int, bool) {
 	}
 	d := math.Round(float64(t.UTC().Sub(time.Now()) / (24 * time.Hour)))
 	return int(d), true
+}
+
+// SiteRoot 只取站点配置里的真实根目录（nginx root / apache DocumentRoot）。
+// 站点目录名不一定等于域名，凡是按域名拼 /var/www/<域名> 的地方都可能落空，
+// 备份、删除这类按目录操作的功能应当先问这里。取不到时返回空串。
+func SiteRoot(pool *sshc.Pool, server sshc.Server, domain string) string {
+	script := `
+f="/etc/nginx/sites-enabled/` + domain + `"
+[ -e "$f" ] || f="/etc/apache2/sites-enabled/` + domain + `.conf"
+[ -e "$f" ] || { exit 0; }
+rootdir=$(awk '$1 == "root" { gsub(/;/, "", $2); print $2; exit }' "$f")
+if [ -z "$rootdir" ]; then
+  rootdir=$(awk '/^[ \t]*DocumentRoot[ \t]/ { sub(/^[ \t]*DocumentRoot[ \t]+/, ""); sub(/#.*/, ""); print; exit }' "$f" | tr -d '"')
+fi
+echo "ROOT=$rootdir"
+`
+	res, err := RunScript(pool, server, script, 15*time.Second)
+	if err != nil || res.Code != 0 {
+		return ""
+	}
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "ROOT="); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // GetSiteDetail 站点详情（脚本与早期实现一致）。

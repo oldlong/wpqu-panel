@@ -620,7 +620,7 @@ func BackupDatabase(pool *sshc.Pool, server sshc.Server, db string, backupDir st
 	if err := mkdirAll(dir); err != nil {
 		return nil, err
 	}
-	name := fmt.Sprintf("db-%s-%s.sql.gz", db, time.Now().UTC().Format("20060102150405"))
+	name := fmt.Sprintf("db-%s-%s.sql.gz", db, time.Now().Format("20060102150405"))
 	local := dir + "/" + name
 	if err := pool.DownloadToFile(server, remote, local, nil); err != nil {
 		return nil, err

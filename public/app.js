@@ -698,10 +698,13 @@ async function vaultModal() {
       title: '设置密码',
       subtitle: `${s.name} 的本地密码正处于锁定状态`,
       body: `${vaultStateLine(info)}
-        <p class="vault-note">锁定期间不接受任何密码尝试，重启面板也不会解除。到时间后重新进来输入密码即可。</p>`,
-      footer: `<button class="btn" data-close>关闭</button>`,
+        <p class="vault-note">锁定期间不接受任何密码尝试，重启面板也不会解除。到时间后重新进来输入密码即可。</p>
+        <p class="vault-note">真忘了密码：可以重置，代价是面板里保存的 SSH 凭据会被一起清掉，需要重新填一次。</p>`,
+      footer: `<button class="btn" data-close>关闭</button>
+               <button class="btn btn-danger" id="vault-reset">忘记密码，重置</button>`,
     });
     $('#modal').querySelector('[data-close]').addEventListener('click', closeModal);
+    $('#vault-reset').addEventListener('click', () => vaultResetFlow(s));
     return;
   }
 
@@ -716,8 +719,8 @@ function vaultSetupModal(s, info) {
     body: `${vaultStateLine(info)}
       <div class="field">
         <label>密码</label>
-        <input type="password" id="vault-new" autocomplete="new-password" placeholder="随便设，几位数字也行">
-        <div class="note">不校验长度与复杂度 —— 防的是顺手拿到这台电脑的人，不是暴力破解</div>
+        <input type="password" id="vault-new" autocomplete="new-password" placeholder="至少 6 位">
+        <div class="note">只要求长度，不限制字符种类 —— 防的是顺手拿到这台电脑的人，不是暴力破解</div>
       </div>
       <div class="field">
         <label>确认密码</label>
@@ -733,6 +736,7 @@ function vaultSetupModal(s, info) {
     const a = $('#vault-new').value;
     const b = $('#vault-new2').value;
     if (!a) return toast('请填写密码', 'err');
+    if ([...a].length < 6) return toast('密码至少 6 位', 'err');
     if (a !== b) return toast('两次输入的密码不一致', 'err');
     const btn = $('#vault-save');
     btn.disabled = true;
@@ -762,12 +766,12 @@ function vaultManageModal(s, info) {
       <div class="field">
         <label>原密码</label>
         <input type="password" id="vault-old" autocomplete="current-password">
-        <div class="note">忘了原密码就关不掉加密，只能移除这台服务器后重新添加</div>
+        <div class="note">忘了原密码：先「关闭加密」是做不到的，用下面的「忘记密码」重置</div>
       </div>
       <div class="field">
         <label>新密码</label>
-        <input type="password" id="vault-new" autocomplete="new-password">
-        <div class="note">不校验强度，几位数字也可以</div>
+        <input type="password" id="vault-new" autocomplete="new-password" placeholder="至少 6 位">
+        <div class="note">只要求长度，不限制字符种类</div>
       </div>
       <div class="field">
         <label>确认新密码</label>
@@ -775,10 +779,12 @@ function vaultManageModal(s, info) {
       </div>
       <p class="vault-note">密码只存在你脑子里：面板不保存密码，也没有找回方式。</p>`,
     footer: `<button class="btn" data-close>取消</button>
+             <button class="btn btn-ghost btn-danger" id="vault-reset">忘记密码</button>
              <button class="btn btn-danger" id="vault-off">关闭加密</button>
              <button class="btn btn-primary" id="vault-save">保存新密码</button>`,
   });
   $('#modal').querySelector('[data-close]').addEventListener('click', closeModal);
+  $('#vault-reset').addEventListener('click', () => vaultResetFlow(s));
 
   const lockBtn = $('#vault-lock');
   if (lockBtn) {
@@ -806,6 +812,7 @@ function vaultManageModal(s, info) {
     const b = $('#vault-new2').value;
     if (!old) return toast('请填写原密码', 'err');
     if (!a) return toast('请填写新密码', 'err');
+    if ([...a].length < 6) return toast('新密码至少 6 位', 'err');
     if (a !== b) return toast('两次输入的密码不一致', 'err');
     const btn = $('#vault-save');
     btn.disabled = true;
@@ -845,6 +852,43 @@ function vaultManageModal(s, info) {
       toast(err.message, 'err');
       btn.disabled = false;
       btn.textContent = '关闭加密';
+    }
+  });
+}
+
+function vaultResetFlow(s) {
+  openModal({
+    title: '重置本地密码',
+    subtitle: `「${s.name}」的本地密码将被清除`,
+    body: `<div class="danger-box">重置会连同面板保存的这台服务器的 SSH 密码 / 私钥一起删掉。
+      凭据本来就只有你的密码能解开，没有密码谁也解不开，只能重新填一次。</div>
+      <p class="vault-note">重置后这台服务器会提示「没有可用凭据」，在右上角「编辑」里重新填密码或私钥即可恢复，站点和数据都不受影响。</p>`,
+    footer: `<button class="btn" data-close>取消</button>
+             <button class="btn btn-danger" id="vault-reset-go">确认重置</button>`,
+  });
+  $('#modal').querySelector('[data-close]').addEventListener('click', closeModal);
+  $('#vault-reset-go').addEventListener('click', async () => {
+    const btn = $('#vault-reset-go');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 重置中';
+    try {
+      await api(`/api/servers/${s.id}/vault/reset`, {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true }),
+        _noVaultPrompt: true,
+      });
+      closeModal();
+      toast('已重置，请重新填写 SSH 凭据', 'ok');
+      await loadServers();
+      renderTopbar();
+      view().innerHTML = `<div class="empty">
+        <strong>已重置本地密码</strong>
+        这台服务器的 SSH 凭据已清除。点右上角「编辑」重新填一次密码或私钥就能继续操作，站点和数据都不受影响。
+      </div>`;
+    } catch (err) {
+      toast(err.message, 'err');
+      btn.disabled = false;
+      btn.textContent = '确认重置';
     }
   });
 }

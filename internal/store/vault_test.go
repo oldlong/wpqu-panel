@@ -36,7 +36,7 @@ func TestVaultLocksCredentials(t *testing.T) {
 	s, dir := newTestStore(t)
 	id := addTestServer(t, s)
 
-	if _, err := s.SetVaultPassword(id, "1234"); err != nil {
+	if _, err := s.SetVaultPassword(id, "123456"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestVaultLocksCredentials(t *testing.T) {
 	}
 
 	// 解锁
-	if _, err := s2.UnlockVault(id, "1234"); err != nil {
+	if _, err := s2.UnlockVault(id, "123456"); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
 	got, err = s2.GetServerWithSecret(id)
@@ -96,7 +96,7 @@ func TestVaultLocksCredentials(t *testing.T) {
 func TestVaultLockoutAfterFiveFails(t *testing.T) {
 	s, dir := newTestStore(t)
 	id := addTestServer(t, s)
-	if _, err := s.SetVaultPassword(id, "0000"); err != nil {
+	if _, err := s.SetVaultPassword(id, "000000"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	s.LockVault(id) // 先丢掉解锁状态
@@ -122,7 +122,7 @@ func TestVaultLockoutAfterFiveFails(t *testing.T) {
 	}
 
 	// 锁定期间即使密码正确也不放行
-	if _, err := s.UnlockVault(id, "0000"); !errors.As(err, &out) {
+	if _, err := s.UnlockVault(id, "000000"); !errors.As(err, &out) {
 		t.Fatalf("锁定期间正确密码也应被拒，got %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestVaultLockoutAfterFiveFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	if _, err := s2.UnlockVault(id, "0000"); !errors.As(err, &out) {
+	if _, err := s2.UnlockVault(id, "000000"); !errors.As(err, &out) {
 		t.Fatalf("重启不应解除锁定，got %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestVaultLockoutAfterFiveFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen2: %v", err)
 	}
-	if _, err := s3.UnlockVault(id, "0000"); err != nil {
+	if _, err := s3.UnlockVault(id, "000000"); err != nil {
 		t.Fatalf("锁定到期后应能解锁，got %v", err)
 	}
 }
@@ -161,23 +161,23 @@ func TestVaultLockoutAfterFiveFails(t *testing.T) {
 func TestVaultChangeAndRemove(t *testing.T) {
 	s, dir := newTestStore(t)
 	id := addTestServer(t, s)
-	if _, err := s.SetVaultPassword(id, "1111"); err != nil {
+	if _, err := s.SetVaultPassword(id, "111111"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
 	// 原密码不对不改
-	if _, err := s.ChangeVaultPassword(id, "9999", "2222"); err == nil {
+	if _, err := s.ChangeVaultPassword(id, "999999", "222222"); err == nil {
 		t.Fatalf("原密码错应失败")
 	}
-	if _, err := s.ChangeVaultPassword(id, "1111", "2222"); err != nil {
+	if _, err := s.ChangeVaultPassword(id, "111111", "222222"); err != nil {
 		t.Fatalf("change: %v", err)
 	}
 
 	s2, _ := Open(dir)
-	if _, err := s2.UnlockVault(id, "1111"); err == nil {
+	if _, err := s2.UnlockVault(id, "111111"); err == nil {
 		t.Fatalf("旧密码应失效")
 	}
-	if _, err := s2.UnlockVault(id, "2222"); err != nil {
+	if _, err := s2.UnlockVault(id, "222222"); err != nil {
 		t.Fatalf("新密码应可用：%v", err)
 	}
 	got, _ := s2.GetServerWithSecret(id)
@@ -186,7 +186,7 @@ func TestVaultChangeAndRemove(t *testing.T) {
 	}
 
 	// 关闭加密：凭据回到机器密钥加密，重启也能直接读
-	if _, err := s2.RemoveVault(id, "2222"); err != nil {
+	if _, err := s2.RemoveVault(id, "222222"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	s3, _ := Open(dir)
@@ -206,7 +206,7 @@ func TestVaultChangeAndRemove(t *testing.T) {
 func TestVaultUpdateCredentialsNeedsUnlock(t *testing.T) {
 	s, dir := newTestStore(t)
 	id := addTestServer(t, s)
-	if _, err := s.SetVaultPassword(id, "abcd"); err != nil {
+	if _, err := s.SetVaultPassword(id, "abcdef"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	s2, _ := Open(dir)
@@ -220,7 +220,7 @@ func TestVaultUpdateCredentialsNeedsUnlock(t *testing.T) {
 		}
 	}
 
-	if _, err := s2.UnlockVault(id, "abcd"); err != nil {
+	if _, err := s2.UnlockVault(id, "abcdef"); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
 	if _, err := s2.UpdateServer(id, ServerInput{Password: "new-pass"}); err != nil {
@@ -245,7 +245,7 @@ func TestVaultUpdateCredentialsNeedsUnlock(t *testing.T) {
 func TestVaultSurvivesMarkServer(t *testing.T) {
 	s, dir := newTestStore(t)
 	id := addTestServer(t, s)
-	if _, err := s.SetVaultPassword(id, "7777"); err != nil {
+	if _, err := s.SetVaultPassword(id, "777777"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if err := s.MarkServer(id, map[string]any{"lastStatus": "ok", "os": "Debian"}); err != nil {
@@ -256,19 +256,62 @@ func TestVaultSurvivesMarkServer(t *testing.T) {
 	if err != nil || info == nil || !info.Enabled {
 		t.Fatalf("vault 应保留，got %+v err=%v", info, err)
 	}
-	if _, err := s2.UnlockVault(id, "7777"); err != nil {
+	if _, err := s2.UnlockVault(id, "777777"); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
 }
 
-// 不校验强度：一位数字也能设。
-func TestVaultAcceptsWeakPassword(t *testing.T) {
+// 只限长度：少于 6 位拒绝，6 位纯数字允许（不限制字符种类）。
+func TestVaultRejectsShortPassword(t *testing.T) {
 	s, _ := newTestStore(t)
 	id := addTestServer(t, s)
-	if _, err := s.SetVaultPassword(id, "1"); err != nil {
-		t.Fatalf("一位数字应允许：%v", err)
+	if _, err := s.SetVaultPassword(id, "1"); err == nil {
+		t.Fatalf("一位数字应拒绝")
+	}
+	if _, err := s.SetVaultPassword(id, "12345"); err == nil {
+		t.Fatalf("五位应拒绝")
 	}
 	if _, err := s.SetVaultPassword(id, "  "); err == nil {
 		t.Fatalf("空白密码应拒绝")
+	}
+	if _, err := s.SetVaultPassword(id, "123456"); err != nil {
+		t.Fatalf("六位纯数字应允许：%v", err)
+	}
+	if _, err := s.ChangeVaultPassword(id, "123456", "123"); err == nil {
+		t.Fatalf("改密码时短密码应拒绝")
+	}
+}
+
+// 忘记密码：重置会清掉口令与凭据，之后这台服务器没有可用凭据。
+func TestVaultResetDropsCredentials(t *testing.T) {
+	s, dir := newTestStore(t)
+	id := addTestServer(t, s)
+	if _, err := s.SetVaultPassword(id, "abcdef"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	info, err := s.ResetVault(id)
+	if err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if info.Enabled {
+		t.Fatalf("重置后不应还是启用状态：%+v", info)
+	}
+	// 重新打开确认落盘：vault 与凭据都没了
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	got, err := s2.GetServerWithSecret(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Locked {
+		t.Fatalf("重置后不应是锁定态（是「没有凭据」）")
+	}
+	if got.Credentials != nil {
+		t.Fatalf("重置后凭据应被清掉，got %+v", got.Credentials)
+	}
+	if _, err := s2.ResetVault(id); err == nil {
+		t.Fatalf("没有密码时重置应报错")
 	}
 }

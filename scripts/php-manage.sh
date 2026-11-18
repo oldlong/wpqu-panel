@@ -430,9 +430,10 @@ LOG_FILE=/var/log/wp-maint.log
 NGINX_SNIPPETS=/etc/nginx/snippets
 POOL_ROOT=/etc/php
 
-# 没装 Web 服务器时（纯 PHP 环境）不报错，只是站点列表为空
+# 没装 Web 服务器时（纯 PHP 环境）不报错，只是站点列表为空。
+# ws_init 定义在下面的适配层里，必须等注入块加载完再调用（见 ws-lib END 之后），
+# 在这里调用只会 command not found，WS_ENABLED 为空 —— 站点列表和「卸载前检查站点占用」都会失效。
 WS_OK=0
-ws_init >/dev/null 2>&1 && WS_OK=1
 
 step() { printf '\n▸ %s\n' "$*"; }
 ok()   { printf '  ✓ %s\n' "$*"; }
@@ -797,6 +798,9 @@ ws_park_htaccess() {
   return 0
 }
 # <<< ws-lib END
+
+# 适配层已就位，现在才能确定 Web 服务器；失败（纯 PHP 机器）时只是站点列表为空
+if ws_init >/dev/null 2>&1; then WS_OK=1; fi
 
 
 # 只读操作（status）不写日志，避免每刷一次页面就涨一屏

@@ -33,7 +33,7 @@ import (
 )
 
 // Version 与早期实现保持同一版本号，方便对照。
-const Version = "1.9.2"
+const Version = "1.9.3"
 
 // App 聚合全部依赖。
 type App struct {
@@ -93,6 +93,7 @@ func writeErr(w http.ResponseWriter, err error) {
 	if msg == "" {
 		msg = "服务器内部错误"
 	}
+	msg = translateRemoteErr(msg)
 	switch {
 	case errors.As(err, &bad):
 		// 密码错但还没到锁定次数
@@ -116,6 +117,32 @@ func writeErr(w http.ResponseWriter, err error) {
 	default:
 		writeJSON(w, 500, map[string]string{"error": msg})
 	}
+}
+
+// translateRemoteErr 把 SFTP / SSH 库抛出来的英文原话换成中文。
+// 这些错误是 Go 侧透传的（远端返回的 status message），不改的话界面上会冒出
+// 一句 "file does not exist"，跟旁边的中文提示格格不入。
+func translateRemoteErr(msg string) string {
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "file does not exist") || strings.Contains(lower, "no such file"):
+		return "文件或目录不存在（可能刚被删掉，刷新一下）"
+	case strings.Contains(lower, "permission denied"):
+		return "没有权限操作这个路径"
+	case strings.Contains(lower, "is a directory"):
+		return "这是一个目录，不能当文件操作"
+	case strings.Contains(lower, "not a directory"):
+		return "这中间有一段不是目录"
+	case strings.Contains(lower, "connection lost") || strings.Contains(lower, "use of closed network connection"):
+		return "与服务器的连接断开了，请重试"
+	case strings.Contains(lower, "connection refused"):
+		return "服务器拒绝了连接，检查 SSH 服务是否在跑"
+	case strings.Contains(lower, "connection reset by peer"):
+		return "连接被远端重置，请重试"
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "timed out"):
+		return "远端操作超时，请重试"
+	}
+	return msg
 }
 
 // readJSON 读请求体（带大小限制）。
@@ -449,7 +476,7 @@ func (app *App) getServerOrThrow(id string) (*store.ServerWithSecret, error) {
 		return nil, &store.VaultNeedPassword{ServerID: server.ID, Name: server.Name, LockedUntil: server.LockedUntil}
 	}
 	if server.Credentials == nil {
-		return nil, errors.New("该服务器的凭据读取失败，请重新编辑并填写密码或私钥")
+		return nil, errors.New("该服务器没有可用凭据（重置过本地密码也会这样），请在「编辑」里重新填写密码或私钥")
 	}
 	return server, nil
 }
@@ -684,6 +711,33 @@ func init() {
 		}
 		_ = app.Store.AppendLog(map[string]any{"type": "server.vault.remove", "serverId": id, "result": "ok"})
 		writeJSON(w, 200, map[string]any{"vault": info})
+	})
+
+	// POST 重置：忘记密码、又不想等锁定结束时用。密码和凭据一起丢掉，
+	// 之后必须重新填 SSH 凭据；要求显式 confirm，免得点错就清空。
+	route("POST", "/api/servers/:id/vault/reset", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
+		id, err := AssertID(p["id"], "")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		body, err := readJSON(r, 0)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if !boolDefault(body["confirm"], false) {
+			writeErr(w, badRequest("请确认要重置：本地密码与保存的 SSH 凭据都会被清掉"))
+			return
+		}
+		info, err := app.Store.ResetVault(id)
+		if err != nil {
+			_ = app.Store.AppendLog(map[string]any{"type": "server.vault.reset", "serverId": id, "result": "error", "error": err.Error()})
+			writeErr(w, err)
+			return
+		}
+		_ = app.Store.AppendLog(map[string]any{"type": "server.vault.reset", "serverId": id, "result": "ok"})
+		writeJSON(w, 200, map[string]any{"vault": info, "needsCreds": true})
 	})
 
 	route("POST", "/api/servers/:id/test", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
@@ -1463,10 +1517,11 @@ func init() {
 		describe: func(b map[string]any) string { return "删除定时任务" },
 		run: func(app *App, server *store.ServerWithSecret, body map[string]any, push func(string)) (*sshc.Result, error) {
 			f := &panelLineFilter{push: push}
+			id, line := cronTarget(body)
 			_, res, err := app.Runner.CronAction(toSSH(server), ops.CronParams{
 				Action: "delete",
-				ID:     strings.TrimSpace(str(body["id"])),
-				Line:   intOf(body["line"]),
+				ID:     id,
+				Line:   line,
 			}, f.Write)
 			f.Flush()
 			return res, err
@@ -1503,13 +1558,33 @@ func init() {
 		noDiagnose: true,
 		describe:   func(b map[string]any) string { return "立即执行定时任务" },
 		validate: func(b map[string]any) error {
+			// 只传行号也接受：前端刷新后命令可能已经变了，行号才是这里的稳定标识
+			if strings.TrimSpace(str(b["command"])) == "" && intOf(b["line"]) <= 0 {
+				return badRequest("命令不能为空")
+			}
+			if strings.TrimSpace(str(b["command"])) == "" {
+				return nil
+			}
 			_, err := validateCronCommand(b["command"])
 			return err
 		},
 		run: func(app *App, server *store.ServerWithSecret, body map[string]any, push func(string)) (*sshc.Result, error) {
-			cmd, err := validateCronCommand(body["command"])
-			if err != nil {
-				return nil, err
+			cmd := strings.TrimSpace(str(body["command"]))
+			if cmd == "" {
+				line := intOf(body["line"])
+				st, err := app.Runner.Cron(toSSH(server))
+				if err != nil {
+					return nil, err
+				}
+				for _, e := range st.Entries {
+					if e.Line == line {
+						cmd = e.Command
+						break
+					}
+				}
+				if cmd == "" {
+					return nil, badRequest("没找到第 " + strconv.Itoa(line) + " 行的任务，请刷新后重试")
+				}
 			}
 			return app.Runner.RunCommand(toSSH(server), cmd, "", 3*time.Minute, push)
 		},
@@ -1573,7 +1648,10 @@ func init() {
 		}
 		sw := startStream(w)
 		sw.event(map[string]any{"type": "start", "message": "备份 " + domain})
-		files, err := app.Runner.BackupSite(toSSH(server), domain,
+		// 站点目录名不一定等于域名（例如 pc5000.com 落在 /var/www/pc5000），
+		// 先按配置解析真实根目录，解析不到才退回 /var/www/<域名>。
+		root := sites.SiteRoot(app.Runner.Pool, toSSH(server), domain)
+		files, err := app.Runner.BackupSite(toSSH(server), domain, root,
 			boolDefault(body["includeDb"], true), boolDefault(body["includeFiles"], true),
 			func(text string) { sw.event(map[string]any{"type": "out", "text": text}) })
 		if err != nil {
@@ -2177,7 +2255,7 @@ func init() {
 		_ = app.Store.AppendLog(map[string]any{"type": "db.export", "serverId": server.ID, "target": name, "result": "ok"})
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Length", strconv.FormatInt(dump.Size, 10))
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="db-%s-%s.sql.gz"`, name, time.Now().UTC().Format("20060102150405")))
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="db-%s-%s.sql.gz"`, name, time.Now().Format("20060102150405")))
 		w.WriteHeader(200)
 		if err := app.Pool.StreamDownload(toSSH(server), dump.Remote, w); err != nil {
 			log.Println("导出下载中断:", err)
@@ -2318,6 +2396,23 @@ func validateCronSchedule(v any) (string, error) {
 		}
 	}
 	return strings.Join(fields, " "), nil
+}
+
+// cronTarget 把前端的 id / line 归一成脚本要的两个参数。
+// 非面板创建的任务没有标记注释，id 由后端补成 line-<行号>（见 ops.ParseCronStatus）；
+// 这种只能按行号删，把 id 传下去反而会让脚本去匹配一条不存在的标记。
+func cronTarget(b map[string]any) (string, int) {
+	id := strings.TrimSpace(str(b["id"]))
+	line := intOf(b["line"])
+	if strings.HasPrefix(id, "line-") {
+		if line <= 0 {
+			if n, err := strconv.Atoi(strings.TrimPrefix(id, "line-")); err == nil {
+				line = n
+			}
+		}
+		return "", line
+	}
+	return id, line
 }
 
 func validateCronCommand(v any) (string, error) {

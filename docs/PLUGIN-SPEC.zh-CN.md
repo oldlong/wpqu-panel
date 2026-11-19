@@ -99,7 +99,7 @@ tools/new-plugin.sh hello-ui "演示面板" "Hello panel" panel # 面板侧插�
 | `priceCny` | 收费必填 | 整数，单位元 |
 | `author` | ✅ | 显示在详情页 |
 | `homepage` | 可选 | 上游官网，详情页给个链接 |
-| `icon` | ✅ | emoji 或 1–2 个字母（第二个字母起用小写更好看，如 `GO`、`PM`） |
+| `icon` | ✅ | emoji，或 1–2 个字母（如 `GO`、`PM`）；市场卡片会用它当图标 |
 | `accent` | ✅ | 卡片主色，`#rrggbb` |
 | `highlights` | ✅ | 3–4 条卖点，每条 12–18 字，双语数组 |
 | `requires.os` | 建议 | `["linux"]`；安装时会真的比对服务器 `uname -s`（小写） |
@@ -170,7 +170,7 @@ tools/new-plugin.sh hello-ui "演示面板" "Hello panel" panel # 面板侧插�
 - 只判断"在不在"，不要在这里升级或修复。
 - 每次打开某台服务器的插件页，会对这台机器跑一次，所以**要快**：`test -f`、`command -v`、`ls`。
 - 不要在里面联网、不要 `systemctl status`（慢且可能挂住）。
-- 可以多行，但不要用 `&&` 硬拼条件链（会破坏 if 结构），写正常的多行 shell 即可。
+- 可以多行，直接写成正常的多行 shell 即可；不要为了"一行"用 `&&` 硬拼（含 `if`/`for` 时会被拼坏）。
 
 ### 3.2 `versionCmd`
 

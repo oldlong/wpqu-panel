@@ -202,6 +202,7 @@ are Chinese; the UI language covers the panel's own interface.
 | [docs/GUIDE.md](docs/GUIDE.md) | Step-by-step guide: install, add a server, every tab explained, troubleshooting |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the panel, the scripts and the browser fit together; how to add a feature |
 | [docs/API.md](docs/API.md) | All HTTP endpoints, request fields, streaming format |
+| [docs/PLUGIN-SPEC.zh-CN.md](docs/PLUGIN-SPEC.zh-CN.md) | Plugin development spec (Chinese): manifest fields, install/uninstall scripts, parameter injection, packaging, self-test checklist |
 | [SECURITY.md](SECURITY.md) | Threat model, guarantees, known gaps, reporting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Build, test, code layout, pull request checklist |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |

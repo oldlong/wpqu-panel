@@ -184,6 +184,7 @@ stdout 按行以 JSON 流回浏览器 → 脚本删掉。协议就这么点，�
 | [docs/GUIDE.zh-CN.md](docs/GUIDE.zh-CN.md) | 逐步操作指南：安装、加服务器、每个页签怎么用、排错 |
 | [docs/ARCHITECTURE.zh-CN.md](docs/ARCHITECTURE.zh-CN.md) | 面板、脚本、浏览器怎么协作；怎么加功能 |
 | [docs/API.zh-CN.md](docs/API.zh-CN.md) | 全部 HTTP 接口、请求字段、流式格式 |
+| [docs/PLUGIN-SPEC.zh-CN.md](docs/PLUGIN-SPEC.zh-CN.md) | 插件开发规范：清单字段、安装/卸载脚本、参数注入、打包发布、自测清单 |
 | [SECURITY.zh-CN.md](SECURITY.zh-CN.md) | 威胁模型、安全承诺、已知缺口、漏洞上报 |
 | [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) | 编译、测试、代码结构、PR 检查清单 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |

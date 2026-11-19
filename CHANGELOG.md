@@ -4,6 +4,19 @@
 
 Notable changes, newest first. Versions are the value returned by `/api/ping`.
 
+## 1.10.1
+
+**Emergency fixes: refresh package indexes before upgrading**
+
+- A one-click fix now runs `apt-get update` before touching apt. Right after a vulnerability lands the
+  local index is often stale; `--only-upgrade` alone reported "nothing to upgrade", so the panel looked
+  patched while the fix was never installed
+- Pure `sh` fixes (reload a service, for example) skip that step
+- "Show commands" and the `/security.html` page show the same line, so the displayed script matches what
+  actually runs
+- The feed's "updated" time is shown in local time instead of a raw ISO string, and the English UI now
+  covers "checked / updated / signature verified / no pending upgrades"
+
 ## 1.10.0
 
 **Emergency fixes: patches that do not need a panel release**

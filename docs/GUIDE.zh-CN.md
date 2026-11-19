@@ -450,7 +450,7 @@ WPQU1.eyJwIjoib3BlbmNsYXciLCJlIjoiMjAyNy0xMi0zMSIsInMiOjUsIm4iOiLlvKDkuIkiLCJpIj
 
 ## 15. 更新
 
-侧栏底部那个 `v1.10.0` 按钮就是入口。点开是「关于」，里面有版本号、更新检查、以及更新内容。
+侧栏底部那个 `v1.10.1` 按钮就是入口。点开是「关于」，里面有版本号、更新检查、以及更新内容。
 
 ### 什么时候检查
 

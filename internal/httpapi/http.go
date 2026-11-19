@@ -34,7 +34,7 @@ import (
 )
 
 // Version 与早期实现保持同一版本号，方便对照。
-const Version = "1.10.0"
+const Version = "1.10.1"
 
 // App 聚合全部依赖。
 type App struct {

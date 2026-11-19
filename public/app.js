@@ -3739,7 +3739,7 @@ function securityView(st) {
           affected
             ? `<strong style="color:var(--danger)">${affected} 项需要处理</strong>`
             : `<strong style="color:var(--ok)">没有需要紧急处理的项</strong>`
-        }<span class="muted"> · 检查于 ${secStamp(scan.checkedAt)}</span></span>`;
+        }<span class="muted"> · <span>检查于</span> ${secStamp(scan.checkedAt)}</span></span>`;
 
   return `
     ${noticeHtml}
@@ -3749,7 +3749,7 @@ function securityView(st) {
           <div class="card-title">紧急修复</div>
           <div class="muted" style="font-size:11.5px">
             清单来自 <a href="${esc(feed.page || 'https://panel.wpqu.com/security.html')}" target="_blank" rel="noopener">官方推送页</a>
-            ${feed.updated ? `· 更新于 ${esc(feed.updated)}` : ''} · 签名已校验
+            ${feed.updated ? `· <span>更新于</span> ${secStamp(feed.updated)}` : ''} · <span>签名已校验</span>
           </div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
@@ -3766,10 +3766,7 @@ function securityView(st) {
              </div>`
       }
     </div>
-    <div class="note" style="margin-top:10px">
-      修复命令随清单一并签名，面板执行前会校验签名；命令内容在「查看命令」里可以看到。
-      执行记录会写进「操作记录」。
-    </div>`;
+    <div class="note" style="margin-top:10px">修复命令随清单一并签名，面板执行前会校验签名；命令内容在「查看命令」里可以看到。执行记录会写进「操作记录」。</div>`;
 }
 
 function secFixCard(fix, res, st, scanning) {
@@ -3821,7 +3818,7 @@ function secFixCard(fix, res, st, scanning) {
 // 只做展示：真正执行的脚本在后端由签名清单重新生成，前端拼的文本进不了命令
 function secStepsText(fix) {
   const steps = (fix.action && fix.action.steps) || [];
-  return steps
+  const lines = steps
     .map((s) => {
       if (s.kind === 'apt') {
         const flag = s.install ? '' : ' --only-upgrade';
@@ -3830,8 +3827,12 @@ function secStepsText(fix) {
       if (s.kind === 'sh') return (s.script || '').trim();
       return `# 未知步骤：${s.kind}`;
     })
-    .filter(Boolean)
-    .join('\n\n');
+    .filter(Boolean);
+  // 有 apt 步骤时后端会先刷一次索引，这里照实展示
+  if (steps.some((s) => s.kind === 'apt' && (s.packages || []).length)) {
+    lines.unshift('apt-get update -qq || true');
+  }
+  return lines.join('\n\n');
 }
 
 function secFixFlow(id) {

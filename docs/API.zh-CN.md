@@ -16,7 +16,7 @@
 
 ```bash
 curl -s http://127.0.0.1:7788/api/ping
-# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.10.0"}
+# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.10.1"}
 
 curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 ```

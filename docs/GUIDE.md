@@ -504,7 +504,7 @@ not download again.
 
 ## 15. Updates
 
-The `v1.10.0` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
+The `v1.10.1` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
 current version, the update check, and the release notes.
 
 ### When it checks

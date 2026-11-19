@@ -486,6 +486,19 @@ func (f Fix) Script() string {
 	b.WriteString("set -e\n")
 	b.WriteString("export DEBIAN_FRONTEND=noninteractive\n")
 	b.WriteString("export LC_ALL=C\n")
+	// 先刷一次索引：漏洞刚爆出来时本机 apt 索引往往还是旧的，
+	// 不 update 直接 --only-upgrade 会「没有可升级的包」，等于修了个寂寞。
+	needApt := false
+	for _, s := range f.Action.Steps {
+		if s.Kind == "apt" && len(s.Packages) > 0 {
+			needApt = true
+			break
+		}
+	}
+	if needApt {
+		b.WriteString("echo '刷新软件源'\n")
+		b.WriteString("apt-get update -qq >/dev/null 2>&1 || true\n")
+	}
 	for i, s := range f.Action.Steps {
 		switch s.Kind {
 		case "apt":

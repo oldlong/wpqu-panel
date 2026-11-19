@@ -118,10 +118,14 @@ func TestFixScript(t *testing.T) {
 		{Kind: "sh", Label: "重载 nginx", Script: "nginx -t && systemctl reload nginx"},
 	}}}
 	s := f.Script()
-	for _, want := range []string{"set -e", "apt-get install -y --only-upgrade 'nginx'", "重载 nginx", "systemctl reload"} {
+	for _, want := range []string{"set -e", "apt-get update", "apt-get install -y --only-upgrade 'nginx'", "重载 nginx", "systemctl reload"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("脚本缺少 %q：\n%s", want, s)
 		}
+	}
+	// update 必须在 install 之前，否则索引还是旧的
+	if strings.Index(s, "apt-get update") > strings.Index(s, "apt-get install") {
+		t.Fatalf("刷新索引应在安装之前：\n%s", s)
 	}
 	if strings.Contains(s, "| bash") {
 		t.Fatal("脚本不应包含管道执行")
@@ -132,6 +136,14 @@ func TestFixScriptInstall(t *testing.T) {
 	f := Fix{Action: Action{Steps: []Step{{Kind: "apt", Packages: []string{"certbot"}, Install: true}}}}
 	if !strings.Contains(f.Script(), "apt-get install -y 'certbot'") {
 		t.Fatalf("install=true 不应加 --only-upgrade：\n%s", f.Script())
+	}
+}
+
+// 纯 sh 的修复（比如只重载服务）不该出现 apt-get update
+func TestFixScriptNoAptStepSkipsUpdate(t *testing.T) {
+	f := Fix{Action: Action{Steps: []Step{{Kind: "sh", Script: "systemctl reload nginx"}}}}
+	if strings.Contains(f.Script(), "apt-get update") {
+		t.Fatalf("没有 apt 步骤时不该刷索引：\n%s", f.Script())
 	}
 }
 

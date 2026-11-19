@@ -29,7 +29,10 @@ export default {
   '清单来自': 'Feed from',
   '官方推送页': 'the official feed page',
   '更新于': 'updated',
+  '检查于': 'checked',
   '签名已校验': 'signature verified',
+  '没有待升级的包': 'no pending upgrades',
+  '已是最新': 'already up to date',
   '没有需要紧急处理的项': 'Nothing needs urgent attention',
   '官网还没有推送紧急修复项': 'No emergency fixes published yet',
   '出现重大漏洞时，这里会自动出现对应的检测与一键修复，不用等面板升级':

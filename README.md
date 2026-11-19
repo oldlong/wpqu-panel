@@ -208,7 +208,7 @@ are Chinese; the UI language covers the panel's own interface.
 
 ## Project status
 
-Version 1.9.3. The panel is used daily against a handful of real Debian/Ubuntu servers, but treat it
+Version 1.10.0. The panel is used daily against a handful of real Debian/Ubuntu servers, but treat it
 as a one-maintainer project: the API may still change between minor versions, and release binaries
 are unsigned.
 

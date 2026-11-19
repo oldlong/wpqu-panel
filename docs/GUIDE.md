@@ -284,6 +284,18 @@ PHP and the web server — no "uploaded but WordPress cannot update" surprises.
 
 ## 9. Maintenance
 
+### Emergency fixes
+
+When base software (nginx, PHP and friends) gets a serious vulnerability, the panel does not need a
+release: this tab pulls a **signed** feed from `https://panel.wpqu.com/api/security.json` holding the
+advisories plus the detection rule and fix steps.
+
+- Opening the tab runs the check; a hit shows "current → fixed" and a one-click button
+- "Show commands" reveals the script first, "Fix now" runs it; output streams and a re-check follows
+- Commands are signed with the same release key as update packages and are rejected if the signature
+  fails; the API only accepts a fix id, so the browser cannot smuggle in its own command
+- Entries whose `minPanel` is newer than the running panel are skipped
+
 ### PHP versions
 
 Shows every installed `php*-fpm`, the default CLI version, and which version each site is bound to
@@ -492,7 +504,7 @@ not download again.
 
 ## 15. Updates
 
-The `v1.9.3` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
+The `v1.10.0` button at the bottom of the sidebar is the entry point. It opens an About dialog with the
 current version, the update check, and the release notes.
 
 ### When it checks

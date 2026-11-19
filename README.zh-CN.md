@@ -190,7 +190,7 @@ stdout 按行以 JSON 流回浏览器 → 脚本删掉。协议就这么点，�
 
 ## 项目状态
 
-当前版本 1.9.3。日常在几台真实 Debian/Ubuntu 服务器上使用，但仍属单人维护项目：小版本之间接口仍可能
+当前版本 1.10.0。日常在几台真实 Debian/Ubuntu 服务器上使用，但仍属单人维护项目：小版本之间接口仍可能
 调整，发布包没有代码签名。
 
 已验证的组合：Debian 13 + MariaDB 11 + nginx、Debian 13 + MySQL 8.4 + nginx、Debian 13 + Apache 2.4 +

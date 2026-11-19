@@ -26,12 +26,13 @@ const state = {
 
 function newMaintState() {
   return {
-    tab: 'php', // php | logs | cron | exec
+    tab: 'php', // sec | php | logs | cron | exec
     php: null,
     logs: null,
     logFilter: 'all',
     cron: null,
     exec: { out: '', running: false, cmd: '', cwd: '', seconds: 120 },
+    sec: { feed: null, error: '', scan: null, scanFor: '', scanning: false, running: '', out: '', outFor: '' },
   };
 }
 
@@ -1360,6 +1361,12 @@ view().addEventListener('click', async (e) => {
       if (box) box.innerHTML = `<div class="muted"><span class="spinner"></span> 读取中…</div>`;
       return renderMaintPane();
     }
+    case 'sec-reload':
+      return renderSecurityPane(true);
+    case 'sec-scan':
+      return secScan();
+    case 'sec-fix':
+      return secFixFlow(el.dataset.id);
     case 'php-reload':
       return renderPHPPane(true);
     case 'php-install':
@@ -3595,6 +3602,7 @@ function ftpSaveConfig() {
 /* ---------------------------------------------------------------- 维护 */
 
 const MAINT_TABS = [
+  { key: 'sec', label: '紧急修复' },
   { key: 'php', label: 'PHP 版本' },
   { key: 'logs', label: '网站日志' },
   { key: 'cron', label: '定时任务' },
@@ -3618,10 +3626,275 @@ function renderMaintPane(force) {
   const box = $('#maint-body');
   if (!box) return;
   const t = state.maint.tab;
+  if (t === 'sec') return renderSecurityPane(force);
   if (t === 'php') return renderPHPPane(force);
   if (t === 'logs') return renderLogsPane(force);
   if (t === 'cron') return renderCronPane(force);
   return renderExecPane();
+}
+
+/* ---------------------------------------------------------------- 紧急修复 */
+
+const SEC_LEVELS = {
+  critical: { label: '严重', cls: 'danger' },
+  high: { label: '高危', cls: 'danger' },
+  warn: { label: '注意', cls: 'warn' },
+  info: { label: '公告', cls: 'info' },
+};
+
+function secLevel(l) {
+  return SEC_LEVELS[String(l || '').toLowerCase()] || SEC_LEVELS.info;
+}
+
+function secStamp(iso) {
+  if (!iso) return '还没检查';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return esc(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function renderSecurityPane(force) {
+  const st = state.maint.sec;
+  const box = $('#maint-body');
+  if (!box) return;
+  if (force) {
+    st.scan = null;
+    st.feed = null;
+  }
+  if (!st.feed) {
+    box.innerHTML = `<div class="muted"><span class="spinner"></span> 正在获取紧急修复清单…</div>`;
+    try {
+      st.feed = await api('/api/security/feed' + (force ? '?refresh=1' : ''));
+      st.error = '';
+    } catch (err) {
+      st.error = err.message;
+    }
+  }
+  if (state.maint.tab !== 'sec') return;
+  const live = $('#maint-body');
+  if (!live) return;
+  if (!st.feed) return maintError(st.error || '读取紧急修复清单失败', 'sec-reload');
+
+  live.innerHTML = securityView(st);
+  if (!st.scan || st.scanFor !== state.currentId) secScan();
+}
+
+async function secScan() {
+  const st = state.maint.sec;
+  if (st.scanning) return;
+  st.scanning = true;
+  const note = $('#sec-scan-note');
+  if (note) note.innerHTML = `<span class="spinner"></span> 正在检查这台服务器…`;
+  try {
+    st.scan = await api(`/api/servers/${state.currentId}/security/scan`, { method: 'POST', body: '{}' });
+    st.scanFor = state.currentId;
+  } catch (err) {
+    st.scan = { error: err.message, items: [] };
+    st.scanFor = state.currentId;
+  }
+  st.scanning = false;
+  if (state.maint.tab !== 'sec') return;
+  const box = $('#maint-body');
+  if (box) box.innerHTML = securityView(st);
+}
+
+function securityView(st) {
+  const feed = st.feed || {};
+  const fixes = feed.fixes || [];
+  const notices = (feed.notices || []).slice(0, 3);
+  const scan = st.scan || {};
+  const items = scan.items || [];
+  const byId = {};
+  items.forEach((r) => (byId[r.id] = r));
+  const affected = items.filter((r) => r.affected).length;
+  const scanning = st.scanning || !st.scan;
+
+  const noticeHtml = notices.length
+    ? `<div class="sec-notices">${notices
+        .map((n) => {
+          const lv = secLevel(n.level);
+          return `<div class="sec-notice is-${lv.cls}">
+            <div class="sec-notice-head">
+              <span class="tag ${lv.cls}">${lv.label}</span>
+              <strong>${esc(pickLang(n.title))}</strong>
+              ${n.date ? `<span class="sec-date">${esc(n.date)}</span>` : ''}
+              ${n.url ? `<a class="sec-link" href="${esc(n.url)}" target="_blank" rel="noopener">原文</a>` : ''}
+            </div>
+            ${n.body ? `<div class="sec-notice-body">${esc(pickLang(n.body))}</div>` : ''}
+          </div>`;
+        })
+        .join('')}</div>`
+    : '';
+
+  const fixHtml = fixes.length
+    ? fixes.map((f) => secFixCard(f, byId[f.id], st, scanning)).join('')
+    : '';
+
+  const summary = scanning
+    ? `<span class="muted" id="sec-scan-note"><span class="spinner"></span> 正在检查这台服务器…</span>`
+    : scan.error
+      ? `<span style="color:var(--danger)" id="sec-scan-note">检查失败：${esc(scan.error)}</span>`
+      : `<span id="sec-scan-note">${
+          affected
+            ? `<strong style="color:var(--danger)">${affected} 项需要处理</strong>`
+            : `<strong style="color:var(--ok)">没有需要紧急处理的项</strong>`
+        }<span class="muted"> · 检查于 ${secStamp(scan.checkedAt)}</span></span>`;
+
+  return `
+    ${noticeHtml}
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">紧急修复</div>
+          <div class="muted" style="font-size:11.5px">
+            清单来自 <a href="${esc(feed.page || 'https://panel.wpqu.com/security.html')}" target="_blank" rel="noopener">官方推送页</a>
+            ${feed.updated ? `· 更新于 ${esc(feed.updated)}` : ''} · 签名已校验
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${summary}
+          <button class="btn btn-sm" data-act="sec-reload" ${st.scanning ? 'disabled' : ''}>重新检测</button>
+        </div>
+      </div>
+      ${
+        fixes.length
+          ? fixHtml
+          : `<div class="empty" style="padding:34px 0">
+              <strong>官网还没有推送紧急修复项</strong>
+              出现重大漏洞时，这里会自动出现对应的检测与一键修复，不用等面板升级
+             </div>`
+      }
+    </div>
+    <div class="note" style="margin-top:10px">
+      修复命令随清单一并签名，面板执行前会校验签名；命令内容在「查看命令」里可以看到。
+      执行记录会写进「操作记录」。
+    </div>`;
+}
+
+function secFixCard(fix, res, st, scanning) {
+  const lv = secLevel(fix.level);
+  const running = st.running === fix.id;
+  const status = running
+    ? '<span class="tag info">修复中…</span>'
+    : !res || scanning
+      ? '<span class="tag">检测中</span>'
+      : res.affected
+        ? `<span class="tag ${lv.cls === 'info' ? 'warn' : lv.cls}">需要修复</span>`
+        : res.status === 'skip'
+          ? '<span class="tag">不适用</span>'
+          : '<span class="tag ok">无需处理</span>';
+
+  const detail =
+    res && res.detail
+      ? `<div class="sec-detail mono">${esc(res.detail)}</div>`
+      : '';
+
+  const ups = res && res.updates && res.updates.length
+    ? `<div class="sec-ups">${res.updates
+        .map((u) => `<span class="mono">${esc(u.package)} ${esc(u.from)} → ${esc(u.to)}</span>`)
+        .join('')}</div>`
+    : '';
+
+  const cmdText = secStepsText(fix);
+
+  return `<div class="sec-fix ${res && res.affected ? 'is-hit' : ''}">
+    <div class="sec-fix-head">
+      <span class="tag ${lv.cls}">${lv.label}</span>
+      <strong>${esc(pickLang(fix.title))}</strong>
+      ${status}
+      ${fix.url ? `<a class="sec-link" href="${esc(fix.url)}" target="_blank" rel="noopener">公告</a>` : ''}
+    </div>
+    ${fix.summary && pickLang(fix.summary) ? `<div class="sec-fix-sum">${esc(pickLang(fix.summary))}</div>` : ''}
+    ${detail}${ups}
+    <div class="sec-fix-bar">
+      <details class="sec-cmd"><summary>查看命令</summary><pre class="mono">${esc(cmdText)}</pre></details>
+      <button class="btn btn-sm ${res && res.affected ? 'btn-primary' : ''}" data-act="sec-fix" data-id="${esc(fix.id)}"
+        ${res && res.affected && !running && !st.scanning ? '' : 'disabled'}>
+        ${running ? '修复中…' : pickLang(fix.action && fix.action.title) || '一键修复'}
+      </button>
+    </div>
+    ${running || st.outFor === fix.id ? `<pre class="exec-out" id="sec-out">${esc(st.out) || '（等待输出）'}</pre>` : ''}
+  </div>`;
+}
+
+// 只做展示：真正执行的脚本在后端由签名清单重新生成，前端拼的文本进不了命令
+function secStepsText(fix) {
+  const steps = (fix.action && fix.action.steps) || [];
+  return steps
+    .map((s) => {
+      if (s.kind === 'apt') {
+        const flag = s.install ? '' : ' --only-upgrade';
+        return `apt-get install -y${flag} ${(s.packages || []).join(' ')}`;
+      }
+      if (s.kind === 'sh') return (s.script || '').trim();
+      return `# 未知步骤：${s.kind}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function secFixFlow(id) {
+  const st = state.maint.sec;
+  const fix = ((st.feed && st.feed.fixes) || []).find((x) => x.id === id);
+  if (!fix) return toast('这条修复已经不在清单里，刷新后再试', 'err');
+  const res = ((st.scan && st.scan.items) || []).find((r) => r.id === id);
+  openModal({
+    title: '一键修复',
+    subtitle: `${pickLang(fix.title)}${res && res.detail ? ' · ' + res.detail : ''}`,
+    body: `
+      <div class="note" style="margin-bottom:10px">将在服务器上以 root 执行下面这些命令，过程中会短暂重载服务。命令来自签名清单，不会改动站点文件。</div>
+      <pre class="mono sec-cmd-block">${esc(secStepsText(fix))}</pre>
+      <div class="note">执行完会自动重新检测一次。想先备份的话，去「备份」栏目做一个。</div>`,
+    footer: `<button class="btn" data-close>取消</button>
+             <button class="btn btn-primary" id="sec-go">开始修复</button>`,
+  });
+  const modal = $('#modal');
+  modal.querySelector('[data-close]').addEventListener('click', closeModal);
+  $('#sec-go').addEventListener('click', () => {
+    closeModal();
+    secFixRun(id);
+  });
+}
+
+async function secFixRun(id) {
+  const st = state.maint.sec;
+  if (st.running) return;
+  st.running = id;
+  st.out = '';
+  st.outFor = id;
+  const box = $('#maint-body');
+  if (box) box.innerHTML = securityView(st);
+
+  const append = (text) => {
+    st.out += text;
+    const el = $('#sec-out');
+    if (el) {
+      el.textContent = st.out;
+      el.scrollTop = el.scrollHeight;
+    }
+  };
+
+  await streamPost(
+    `/api/servers/${state.currentId}/security/fix`,
+    { id },
+    {
+      out: append,
+      end: (evt) => {
+        const secs = evt.durationMs ? `，${(evt.durationMs / 1000).toFixed(1)}s` : '';
+        append(`\n[${evt.ok ? '完成' : '失败'}：${evt.message}${secs}]\n`);
+      },
+      error: (msg) => append(`\n[错误] ${msg}\n`),
+    },
+  );
+
+  st.running = '';
+  if (state.maint.tab === 'sec') {
+    st.scan = null;
+    await secScan();
+  }
+  if (!st.out.includes('[完成')) return;
+  toast('修复已执行，已重新检测');
 }
 
 function maintError(msg, act) {

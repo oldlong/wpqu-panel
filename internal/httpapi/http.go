@@ -26,6 +26,7 @@ import (
 	"wpqu-panel/internal/dbx"
 	"wpqu-panel/internal/ops"
 	"wpqu-panel/internal/plugins"
+	"wpqu-panel/internal/security"
 	"wpqu-panel/internal/sites"
 	"wpqu-panel/internal/sshc"
 	"wpqu-panel/internal/store"
@@ -33,7 +34,7 @@ import (
 )
 
 // Version 与早期实现保持同一版本号，方便对照。
-const Version = "1.9.3"
+const Version = "1.10.0"
 
 // App 聚合全部依赖。
 type App struct {
@@ -44,8 +45,9 @@ type App struct {
 	Version string
 	DataDir string
 
-	Updater *updater.Client
-	Plugins *plugins.Manager
+	Updater  *updater.Client
+	Plugins  *plugins.Manager
+	Security *security.Client
 
 	srv      *http.Server
 	stopCh   chan struct{}
@@ -1630,6 +1632,15 @@ func init() {
 		},
 	})
 
+	// 紧急修复：公告 + 检测 + 一键升级。命令全部来自签名清单。
+	route("GET", "/api/security/feed", func(app *App, w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		app.securityFeed(w, r)
+	})
+	route("POST", "/api/servers/:id/security/scan", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
+		app.securityScan(w, r, p)
+	})
+	streamRoute("/api/servers/:id/security/fix", securityFix())
+
 	route("POST", "/api/servers/:id/backup", func(app *App, w http.ResponseWriter, r *http.Request, p map[string]string) {
 		server, err := app.getServerOrThrow(p["id"])
 		if err != nil {
@@ -2704,7 +2715,9 @@ func NewApp(dataDir string, public, scripts embed.FS) (*App, error) {
 		DataDir: dataDir,
 		Updater: updater.New(dataDir, Version),
 		Plugins: plugins.NewManager(dataDir),
-		stopCh:  make(chan struct{}),
+		// 紧急修复清单与升级包同一个分发站、同一把公钥
+		Security: security.New(Version),
+		stopCh:   make(chan struct{}),
 	}
 	// Runner 与路由共享同一个连接池
 	app.Runner.Pool = app.Pool

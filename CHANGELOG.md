@@ -4,6 +4,24 @@
 
 Notable changes, newest first. Versions are the value returned by `/api/ping`.
 
+## 1.10.0
+
+**Emergency fixes: patches that do not need a panel release**
+
+- New "Emergency fixes" tab under Maintenance. Opening it pulls a **signed** feed
+  (`panel.wpqu.com/api/security.json`) carrying advisories plus detection rules and fix steps. Whoever
+  runs the distribution site edits one JSON and re-signs; every installed panel sees it on next open,
+  with no panel release
+- Up to three advisories at the top (level / date / source link) — also usable as a notice bar
+- Two detection kinds: `apt` (are upgrades available for these packages — upgrades only, never installs)
+  and `version` (below the feed's threshold). A hit shows "current → fixed"
+- "Show commands" reveals the script first, then "Fix now"; output streams and a re-check follows.
+  Every run lands in Activity as `security.fix`
+- Safety: commands are signed with the feed (same release key as update packages) and rejected on a bad
+  signature; the API accepts only a fix id, so the browser cannot inject a command; entries whose
+  `minPanel` is newer than the running panel are skipped
+- New `/security.html` on the distribution site, linked from the site navigation
+
 ## 1.9.3
 
 **Three high-severity problems in one-step install and plugins**

@@ -6,6 +6,44 @@
  * 不翻的东西：命令输出、路径、日志格式、以及「确认执行」这类要与后端字面量比对的词。
  */
 export default {
+
+  /* ---------- 维护 / 紧急修复 ---------- */
+  '紧急修复': 'Emergency fixes',
+  '正在获取紧急修复清单…': 'Fetching the emergency fix feed…',
+  '正在检查这台服务器…': 'Checking this server…',
+  '重新检测': 'Check again',
+  '一键修复': 'Fix now',
+  '查看命令': 'Show commands',
+  '公告': 'Advisory',
+  '原文': 'Source',
+  '严重': 'Critical',
+  '高危': 'High',
+  '注意': 'Notice',
+  '需要修复': 'Needs fixing',
+  '无需处理': 'Nothing to do',
+  '不适用': 'Not applicable',
+  '检测中': 'Checking',
+  '修复中…': 'Fixing…',
+  '还没检查': 'Not checked yet',
+  '（等待输出）': '(waiting for output)',
+  '清单来自': 'Feed from',
+  '官方推送页': 'the official feed page',
+  '更新于': 'updated',
+  '签名已校验': 'signature verified',
+  '没有需要紧急处理的项': 'Nothing needs urgent attention',
+  '官网还没有推送紧急修复项': 'No emergency fixes published yet',
+  '出现重大漏洞时，这里会自动出现对应的检测与一键修复，不用等面板升级':
+    'When a serious vulnerability lands, the matching check and one-click fix show up here — no panel update needed',
+  '修复命令随清单一并签名，面板执行前会校验签名；命令内容在「查看命令」里可以看到。执行记录会写进「操作记录」。':
+    'Fix commands are signed together with the feed and verified before running; open “Show commands” to read them first. Every run is written to Activity.',
+  '将在服务器上以 root 执行下面这些命令，过程中会短暂重载服务。命令来自签名清单，不会改动站点文件。':
+    'These commands run as root on the server and briefly reload services. They come from the signed feed and do not touch site files.',
+  '执行完会自动重新检测一次。想先备份的话，去「备份」栏目做一个。':
+    'A re-check runs automatically afterwards. If you want a backup first, take one under Backups.',
+  '开始修复': 'Start',
+  '修复已执行，已重新检测': 'Fix applied, re-checked',
+  '这条修复已经不在清单里，刷新后再试': 'This fix is no longer in the feed — refresh and try again',
+  '读取紧急修复清单失败': 'Could not load the emergency fix feed',
   /* ---------- 外壳 / 导航 ---------- */
   '本地运维面板': 'Local ops panel',
   '服务器': 'Servers',

@@ -21,7 +21,7 @@ Example:
 
 ```bash
 curl -s http://127.0.0.1:7788/api/ping
-# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.3"}
+# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.10.0"}
 
 curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 ```
@@ -175,9 +175,20 @@ Refused statements: `CREATE/DROP/ALTER USER|ROLE`, `GRANT`, `REVOKE`, `SET PASSW
 | POST | `/api/servers/:id/cron/run` | `command` | run once now, streamed |
 | POST | `/api/servers/:id/exec` | `command, cwd, seconds` | root shell, streamed; flagged commands need confirmation in the UI |
 
-## Backups
+## Emergency fixes
+
+The feed is served by the distribution site (`/api/security.json` + `.sig`). Commands come from the
+feed only; the API accepts nothing but a fix id.
 
 | Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/api/security/feed` | `refresh=1` optional | Advisories plus the fixes this panel can run (already filtered by `minPanel`) |
+| POST | `/api/servers/:id/security/scan` | `refresh` optional | Runs the check on the server; each item returns `affected / ok / skip` |
+| POST | `/api/servers/:id/security/fix` | `id` | Streaming; runs that fix's steps (apt upgrade plus the verification command from the feed) |
+
+## Backups
+
+| Method | Path | Params | Notes |
 |---|---|---|---|
 | POST | `/api/servers/:id/backup` | `domain, includeDb, includeFiles` | streaming; archive lands in `data/backups/<serverId>/` |
 | GET | `/api/servers/:id/backups` | — | `{backups:[…]}` with name, size, mtime |

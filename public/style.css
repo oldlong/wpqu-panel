@@ -1553,3 +1553,133 @@ select.php-pick:focus { border-color: var(--accent); }
   padding: 8px 10px;
 }
 .vault-msg { min-height: 15px; margin: -4px 0 0; font-size: 12px; color: var(--danger); }
+
+/* ---------------------------------------------------------------- 紧急修复 */
+
+.sec-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sec-notice {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.sec-notice.is-danger { border-left-color: var(--danger); }
+.sec-notice.is-warn { border-left-color: var(--warn); }
+
+.sec-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.sec-notice-body {
+  margin-top: 5px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+
+.sec-date { color: var(--text-3); font-size: 11.5px; }
+
+.sec-link {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.sec-link:hover { text-decoration: underline; }
+
+.sec-fix {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.sec-fix.is-hit {
+  background: var(--surface);
+  border-left: 3px solid var(--danger);
+}
+
+.sec-fix-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.sec-fix-sum {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+
+.sec-detail {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.sec-ups {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.sec-fix-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.sec-cmd {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.sec-cmd summary {
+  cursor: pointer;
+  color: var(--accent);
+  outline: none;
+}
+.sec-cmd pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.sec-cmd-block {
+  padding: 10px 12px;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}

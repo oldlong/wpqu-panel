@@ -16,7 +16,7 @@
 
 ```bash
 curl -s http://127.0.0.1:7788/api/ping
-# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.9.3"}
+# {"impl":"go","ok":true,"time":"2026-11-16T22:41:07+08:00","version":"1.10.0"}
 
 curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 ```
@@ -169,6 +169,16 @@ curl -s http://127.0.0.1:7788/api/servers -H 'x-panel: 1'
 | POST | `/api/servers/:id/cron/toggle` | `line, enabled` | 流式 |
 | POST | `/api/servers/:id/cron/run` | `command` | 立即执行一次，流式 |
 | POST | `/api/servers/:id/exec` | `command, cwd, seconds` | root shell，流式；危险命令界面会拦一道 |
+
+## 紧急修复
+
+清单由分发站下发（`/api/security.json` + `.sig`），命令全部来自清单，接口只接受修复编号。
+
+| 方法 | 路径 | 参数 | 说明 |
+|---|---|---|---|
+| GET | `/api/security/feed` | `refresh=1` 可选 | 公告 + 当前面板能执行的修复项（已按 `minPanel` 过滤） |
+| POST | `/api/servers/:id/security/scan` | `refresh` 可选 | 在服务器上跑一遍检测，返回每项 `affected / ok / skip` |
+| POST | `/api/servers/:id/security/fix` | `id` | 流式；执行该修复项的步骤（apt 升级 + 清单里的校验命令） |
 
 ## 备份
 
